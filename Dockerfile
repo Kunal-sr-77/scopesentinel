@@ -5,6 +5,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes make \
+    && rm --recursive --force /var/lib/apt/lists/*
+
 COPY requirements.lock ./requirements.lock
 RUN pip install --no-cache-dir --requirement requirements.lock
 
