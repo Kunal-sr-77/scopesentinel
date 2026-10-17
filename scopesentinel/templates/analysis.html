@@ -83,6 +83,10 @@
           <span class="draft-kind">{{ analysis.draft.kind }}</span>
           <h3>{{ analysis.draft.title }}</h3>
           <p class="draft-body">{{ analysis.draft.body }}</p>
+          {% if analysis.draft.clarification_questions %}
+            <div class="subsection-label">Clarification questions</div>
+            <ul class="assumption-list">{% for question in analysis.draft.clarification_questions %}<li>{{ question }}</li>{% endfor %}</ul>
+          {% endif %}
           {% if analysis.draft.assumptions %}
             <div class="subsection-label">Assumptions</div>
             {{ tag_list(analysis.draft.assumptions, 'amber', true) }}
@@ -91,10 +95,6 @@
             <div class="estimate-strip">
               <span class="overline">Estimate</span>
               {% if analysis.draft.estimate_label %}<strong>{{ analysis.draft.estimate_label }}</strong>{% endif %}
-              <div class="estimate-values">
-                {% if analysis.draft.estimated_hours is not none %}<span>{{ analysis.draft.estimated_hours }} hrs</span>{% endif %}
-                {% if analysis.draft.estimated_cost is not none %}<span>{{ analysis.draft.estimated_cost }}</span>{% endif %}
-              </div>
             </div>
           {% endif %}
           {% if analysis.draft.estimate_notes %}

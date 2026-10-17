@@ -84,3 +84,19 @@ class WebWorkflowTests(unittest.TestCase):
 
         self.assertIn("Quantity checked against current usage", body)
         self.assertIn("deliverable_quantity_is_checked_against_current_usage", body)
+        self.assertIn("8 estimated hours", body)
+        self.assertIn("$1,000", body)
+        self.assertNotIn("8.0 hrs", body)
+
+    def test_clarification_page_renders_concrete_questions(self) -> None:
+        created = self.client.post(
+            "/requests/new",
+            data={"request_text": "Please improve SEO."},
+        )
+        detail = self.client.get(created.location)
+        body = detail.get_data(as_text=True).lower()
+
+        self.assertIn("metadata", body)
+        self.assertIn("up to 5 pages", body)
+        self.assertIn("strategy/keyword research", body)
+        self.assertIn("excluded", body)

@@ -137,6 +137,26 @@ class EvidenceAndEstimateTests(unittest.TestCase):
         self.assertIn("r-hourly-rate", rationale)
         self.assertNotIn("case-study pages are excluded", rationale)
 
+    def test_seo_clarification_draft_asks_about_included_metadata_or_excluded_strategy(self) -> None:
+        result = analyze_request("Please improve SEO.", evaluation_agreement())
+
+        questions = " ".join(result.draft.clarification_questions).lower()
+        self.assertEqual(result.classification, Classification.NEEDS_CLARIFICATION)
+        self.assertIn("metadata", questions)
+        self.assertIn("included", questions)
+        self.assertIn("up to 5 pages", questions)
+        self.assertIn("strategy", questions)
+        self.assertIn("keyword research", questions)
+        self.assertIn("excluded", questions)
+        self.assertIn("?", result.draft.body)
+
+    def test_vague_design_clarification_draft_asks_for_pages_and_specific_changes(self) -> None:
+        result = analyze_request("Please make the site feel more premium.", evaluation_agreement())
+
+        questions = " ".join(result.draft.clarification_questions).lower()
+        self.assertIn("which pages", questions)
+        self.assertIn("specific changes", questions)
+
     def test_contradictory_typed_clauses_require_clarification(self) -> None:
         agreement = Agreement(
             clauses=[
@@ -179,6 +199,17 @@ class EvidenceAndEstimateTests(unittest.TestCase):
 
 
 class RequestParsingTests(unittest.TestCase):
+    def test_concept_chips_drop_phrase_fragments_and_repeated_noise(self) -> None:
+        parsed = parse_request("Please improve SEO and add two case-study pages; improve the layout.")
+        concepts = [concept for item in parsed.items for concept in item.concepts]
+
+        self.assertIn("case-study page", concepts)
+        self.assertNotIn("case", concepts)
+        self.assertNotIn("study", concepts)
+        self.assertNotIn("pages", concepts)
+        self.assertNotIn("improve", concepts)
+        self.assertEqual(concepts.count("case-study page"), 1)
+
     def test_parser_extracts_action_quantity_unit_synonyms_qualifiers_and_ambiguity(self) -> None:
         parsed = parse_request(
             "Please add two landing pages for mobile, and improve SEO without changing copy."

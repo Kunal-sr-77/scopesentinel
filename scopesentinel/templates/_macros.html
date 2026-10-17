@@ -117,9 +117,10 @@
       <span class="draft-kind">{{ output.get('kind') }}</span>
       <strong class="trace-draft-title">{{ output.get('title') }}</strong>
       <p class="trace-draft-body">{{ output.get('body') }}</p>
-      {% if output.get('assumptions') %}<div class="trace-subsection"><span class="trace-label">Assumptions</span>{{ tag_list(output.get('assumptions'), 'amber') }}</div>{% endif %}
+      {% if output.get('clarification_questions') %}<div class="trace-subsection"><span class="trace-label">Clarification questions</span><ul class="trace-list">{% for question in output.get('clarification_questions') %}<li>{{ question }}</li>{% endfor %}</ul></div>{% endif %}
+      {% if output.get('assumptions') %}<div class="trace-subsection"><span class="trace-label">Assumptions</span>{{ tag_list(output.get('assumptions'), 'amber', true) }}</div>{% endif %}
       {% if output.get('estimate_label') or output.get('estimated_hours') is not none or output.get('estimated_cost') is not none %}
-        <div class="trace-estimate"><span class="trace-label">Estimate</span>{% if output.get('estimate_label') %}<span>{{ output.get('estimate_label') }}</span>{% endif %}{% if output.get('estimated_hours') is not none %}<span>{{ output.get('estimated_hours') }} hrs</span>{% endif %}{% if output.get('estimated_cost') is not none %}<span>{{ output.get('estimated_cost') }}</span>{% endif %}</div>
+        <div class="trace-estimate"><span class="trace-label">Estimate</span>{% if output.get('estimate_label') %}<span>{{ output.get('estimate_label') }}</span>{% endif %}</div>
       {% endif %}
       {% if output.get('estimate_notes') %}<div class="trace-subsection"><span class="trace-label">Estimate notes</span><ul class="trace-list">{% for note in output.get('estimate_notes') %}<li>{{ note }}</li>{% endfor %}</ul></div>{% endif %}
     {% else %}

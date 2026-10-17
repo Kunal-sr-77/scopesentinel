@@ -164,6 +164,7 @@ class DraftAction:
     estimated_cost: float | None = None
     estimate_label: str | None = None
     estimate_notes: list[str] = field(default_factory=list)
+    clarification_questions: list[str] = field(default_factory=list)
 
 
 @dataclass

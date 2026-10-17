@@ -98,6 +98,7 @@ def _concepts(text: str) -> tuple[str, ...]:
         "please", "can", "you", "the", "this", "that", "for", "from", "with", "without",
         "and", "our", "site", "feel", "more", "make", "add", "build", "create", "provide",
         "write", "design", "have", "whole", "instead", "new", "existing", "one", "two", "three",
+        "case", "study", "pages", "page", "improve",
     }
     for word in re.findall(r"[a-z]+", text):
         if len(word) > 3 and word not in stop_words and word not in result:
@@ -734,8 +735,78 @@ def classify_request(parsed: ParseOutput, retrieved: RetrieveOutput, agreement: 
     )
 
 
-def _draft(parsed: ParseOutput, classified: ClassifyOutput, agreement: Agreement) -> DraftAction:
+def _clarification_questions(
+    parsed: ParseOutput,
+    classified: ClassifyOutput,
+    retrieved: RetrieveOutput,
+    agreement: Agreement,
+) -> list[str]:
+    """Turn deterministic uncertainty signals into concrete client questions."""
+
+    questions: list[str] = []
+    for item in parsed.items:
+        if "seo_meaning_ambiguous" in item.ambiguity_tags:
+            metadata_clause = next(
+                (
+                    clause
+                    for clause in agreement.clauses
+                    if clause.id == "d-seo-metadata"
+                    and clause.type is ClauseType.DELIVERABLE
+                ),
+                None,
+            )
+            strategy_clause = next(
+                (
+                    clause
+                    for clause in agreement.clauses
+                    if clause.id == "x-seo-strategy"
+                    and clause.type is ClauseType.EXCLUSION
+                ),
+                None,
+            )
+            if metadata_clause and strategy_clause:
+                quantity = _display_number(float(metadata_clause.quantity)) if metadata_clause.quantity else "the included"
+                questions.append(
+                    f"When you say improve SEO, do you mean SEO metadata (included for up to {quantity} pages under {metadata_clause.id}) or SEO strategy/keyword research (excluded under {strategy_clause.id})?"
+                )
+            else:
+                questions.append(
+                    "When you say improve SEO, do you mean metadata, strategy, keyword research, or another specific SEO task?"
+                )
+        if "design_intent_unspecified" in item.ambiguity_tags:
+            questions.append(
+                "Which pages should be changed, and what specific changes should we make?"
+            )
+        if "quantity_missing" in item.ambiguity_tags:
+            questions.append("How many pages or items should we add or change?")
+        if "current_usage_unknown" in classified.uncertainty_tags:
+            questions.append("How many marketing pages have already been delivered so we can check the remaining allowance?")
+
+    if classified.scheduling_flag == "deadline_conflict":
+        questions.append("Should we keep the agreed launch deadline, or would you like to request a schedule change for review?")
+    if "no_matching_clause" in classified.uncertainty_tags:
+        questions.append("Which agreed deliverable or contract clause should this request be evaluated against?")
+    if classified.conflicting_clause_ids:
+        questions.append(
+            f"Which agreement language should govern: {', '.join(classified.conflicting_clause_ids)}?"
+        )
+    if not questions:
+        questions.append("What specific outcome, quantity, and acceptance criteria should we review against the agreement?")
+    return list(dict.fromkeys(questions))
+
+
+def _draft(
+    parsed: ParseOutput,
+    classified: ClassifyOutput,
+    agreement: Agreement,
+    retrieved: RetrieveOutput,
+) -> DraftAction:
     hours, cost, estimate_label, estimate_notes = _estimate(parsed, agreement)
+    clarification_questions = (
+        _clarification_questions(parsed, classified, retrieved, agreement)
+        if classified.classification is Classification.NEEDS_CLARIFICATION
+        else []
+    )
     if classified.classification is Classification.IN_SCOPE:
         kind, title = "response", "Confirm requested work"
         body = "The request is supported by the cited agreement clauses and can proceed to human review."
@@ -744,7 +815,9 @@ def _draft(parsed: ParseOutput, classified: ClassifyOutput, agreement: Agreement
         body = "The request may exceed the agreement or match excluded work; confirm a change order before proceeding."
     else:
         kind, title = "clarification", "Request clarification"
-        body = "Please clarify the highlighted request details before deciding scope."
+        body = "Please clarify the following before deciding scope:\n\n" + "\n".join(
+            f"- {question}" for question in clarification_questions
+        )
     return DraftAction(
         kind=kind,
         title=title,
@@ -754,6 +827,7 @@ def _draft(parsed: ParseOutput, classified: ClassifyOutput, agreement: Agreement
         estimated_cost=cost,
         estimate_label=estimate_label,
         estimate_notes=estimate_notes,
+        clarification_questions=clarification_questions,
     )
 
 
@@ -774,7 +848,7 @@ def analyze_request(request: Request | str, agreement: Agreement | Project, requ
     parsed = parse_request(request.text)
     retrieved = retrieve_evidence(parsed, agreement)
     classified = classify_request(parsed, retrieved, agreement)
-    draft = _draft(parsed, classified, agreement)
+    draft = _draft(parsed, classified, agreement, retrieved)
     trace = PipelineTrace(parse=parsed, retrieve=retrieved, classify=classified, draft=draft)
     return AnalysisResult(
         request_id=request.id,
