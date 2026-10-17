@@ -45,6 +45,21 @@ return a serializable `PipelineTrace` with `parse`, `retrieve`, `classify`, and
 `draft` outputs. Agreement clauses preserve their original `source_text` and
 are typed as deliverables, exclusions, limits, rates, or deadlines.
 
+### Dependency pin audit
+
+The following exact pins were checked against the PyPI JSON API on 17 October
+2026. All release uploads are on or before the 3 October 2026 cutoff.
+
+| Package | Version | PyPI release date |
+| --- | --- | --- |
+| blinker | 1.9.0 | 2024-11-08 |
+| click | 8.2.1 | 2025-05-20 |
+| Flask | 3.1.2 | 2025-08-19 |
+| itsdangerous | 2.2.0 | 2024-04-16 |
+| Jinja2 | 3.1.6 | 2025-03-05 |
+| MarkupSafe | 3.0.2 | 2024-10-18 |
+| Werkzeug | 3.1.3 | 2024-11-08 |
+
 ## Local setup
 
 Python 3.12.10 is required. A virtual environment is recommended:
@@ -95,22 +110,15 @@ make test
 
 Tests use temporary JSON files. They never write to `data/history.json`.
 
-For a clean container verification, build the image first and then run the
-same test target with networking disabled:
-
-```bash
-docker build -t scopesentinel:step1 .
-docker run --rm --network none scopesentinel:step1 make test
-```
-
 ## Evaluation set
 
-Step 4 will add a fixed evaluation set of at least 15 scenarios. Each scenario
-will specify its expected classification, supporting evidence clause IDs, and
-expected uncertainty behavior, including false positives where a keyword
-matches but the request is excluded or ambiguous. The README will report the
-measured evaluation accuracy after the set is implemented; no accuracy claim
-is made by this skeleton.
+The fixed Step 2 evaluation set is in `scopesentinel/evaluation.py` and contains
+16 labelled scenarios, including worked examples A-E, false-positive keyword
+matches, missing quantities, unknown current usage, and scheduling conflicts.
+Each case specifies its expected classification, supporting evidence clause
+IDs, uncertainty tags, and scheduling flag where applicable. The measured
+evaluation accuracy will be reported after the analysis engine is integrated;
+no accuracy claim is made before that check runs.
 
 ## Safety boundaries
 
