@@ -38,6 +38,16 @@ _CLASSIFICATION_LABELS = {
 }
 
 
+def _request_heading(text: str, word_limit: int = 8) -> str:
+    """Create a concise page heading from the original client wording."""
+
+    words = text.split()
+    if not words:
+        return "Request review"
+    heading = " ".join(words[:word_limit]).rstrip(".,!?;:")
+    return f"{heading}…" if len(words) > word_limit else heading
+
+
 def create_app(store: JsonHistoryStore | None = None) -> Flask:
     app = Flask(__name__)
     app.config["HISTORY_STORE"] = store or JsonHistoryStore(
@@ -93,9 +103,11 @@ def create_app(store: JsonHistoryStore | None = None) -> Flask:
             request_id=record.request.id,
             project_name=project().name,
             client_request=record.request.text,
+            request_heading=_request_heading(record.request.text),
             classification=classification,
             classification_label=_CLASSIFICATION_LABELS[classification.value],
             rationale=tuple(trace.classify.rationale),
+            decision_rules=tuple(trace.classify.decision_rules),
             uncertainty_tags=tuple(result.uncertainty_reasons),
             scheduling_flag=result.scheduling_flag,
             evidence=evidence,

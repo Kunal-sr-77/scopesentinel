@@ -46,25 +46,70 @@
   {% endif %}
 {%- endmacro %}
 
-{% macro pipeline_output(output) -%}
-  {% if output %}
-    <dl class="trace-output">
-      {% for key, value in output.items() %}
-        <div>
-          <dt>{{ key|replace('_', ' ')|title }}</dt>
-          <dd>
-            {% if value is iterable and value is not string and value is not mapping %}
-              {{ value|join(', ') }}
-            {% elif value is mapping %}
-              {{ value|tojson }}
-            {% else %}
-              {{ value }}
-            {% endif %}
-          </dd>
-        </div>
-      {% endfor %}
-    </dl>
+{% macro pipeline_output(stage_key, output) -%}
+  {% if stage_key == 'parse' %}
+    {% if output.get('items') %}
+      <div class="trace-items">
+        {% for item in output.get('items') %}
+          <article class="trace-item-card">
+            <div class="trace-item-label">Request item {{ loop.index }}</div>
+            <strong>{{ item.get('intent') or 'Intent unresolved' }}</strong>
+            {{ tag_list(item.get('concepts'), 'blue') }}
+            <div class="trace-facts">
+              {% if item.get('quantity') is not none %}<span><b>Quantity</b> {{ item.get('quantity') }}</span>{% endif %}
+              {% if item.get('unit') %}<span><b>Unit</b> {{ item.get('unit') }}</span>{% endif %}
+              {% if item.get('qualifiers') %}<span><b>Qualifiers</b> {{ item.get('qualifiers')|join(', ') }}</span>{% endif %}
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="trace-empty">No request items found.</p>
+    {% endif %}
+    {% if output.get('missing_information') %}
+      <div class="trace-subsection"><span class="trace-label">Missing information</span>{{ tag_list(output.get('missing_information'), 'amber') }}</div>
+    {% endif %}
+  {% elif stage_key == 'retrieve' %}
+    {% if output.get('hits') %}
+      <div class="trace-items">
+        {% for hit in output.get('hits') %}
+          <article class="trace-evidence-card">
+            <div class="evidence-item-head"><span class="clause-id">{{ hit.get('clause_id') }}</span><span class="clause-type">{{ hit.get('clause_type') }}</span></div>
+            <blockquote>{{ hit.get('source_text') }}</blockquote>
+            <span class="trace-relation">{{ hit.get('relation') }}</span>
+            {{ tag_list(hit.get('matched_concepts'), 'blue') }}
+            {% if hit.get('matched_constraints') %}{{ tag_list(hit.get('matched_constraints'), 'amber') }}{% endif %}
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="trace-empty">No evidence clauses found.</p>
+    {% endif %}
+    {% if output.get('conflict_clause_ids') %}
+      <div class="trace-subsection"><span class="trace-label">Conflicting clauses</span>{{ tag_list(output.get('conflict_clause_ids'), 'amber') }}</div>
+    {% endif %}
+  {% elif stage_key == 'classify' %}
+    {% set classification = output.get('classification', 'NEEDS_CLARIFICATION') %}
+    <div class="trace-classification"><span class="overline">Classification</span><strong>{{ classification|replace('_', ' ')|title }}</strong></div>
+    {% if output.get('rationale') %}<div class="trace-subsection"><span class="trace-label">Rationale</span><ul class="trace-list">{% for item in output.get('rationale') %}<li>{{ item }}</li>{% endfor %}</ul></div>{% endif %}
+    {% if output.get('decision_rules') %}<div class="trace-subsection"><span class="trace-label">Decision rules</span>{{ tag_list(output.get('decision_rules'), 'neutral') }}</div>{% endif %}
+    {% if output.get('uncertainty_tags') %}<div class="trace-subsection"><span class="trace-label">Uncertainty</span>{{ tag_list(output.get('uncertainty_tags'), 'amber') }}</div>{% endif %}
+    {% if output.get('conflicting_clause_ids') %}<div class="trace-subsection"><span class="trace-label">Conflicting clauses</span>{{ tag_list(output.get('conflicting_clause_ids'), 'amber') }}</div>{% endif %}
+    {% if output.get('scheduling_flag') %}<div class="trace-subsection"><span class="trace-label">Scheduling flag</span><strong>{{ output.get('scheduling_flag') }}</strong></div>{% endif %}
+  {% elif stage_key == 'draft' %}
+    {% if output %}
+      <span class="draft-kind">{{ output.get('kind') }}</span>
+      <strong class="trace-draft-title">{{ output.get('title') }}</strong>
+      <p class="trace-draft-body">{{ output.get('body') }}</p>
+      {% if output.get('assumptions') %}<div class="trace-subsection"><span class="trace-label">Assumptions</span>{{ tag_list(output.get('assumptions'), 'amber') }}</div>{% endif %}
+      {% if output.get('estimate_label') or output.get('estimated_hours') is not none or output.get('estimated_cost') is not none %}
+        <div class="trace-estimate"><span class="trace-label">Estimate</span>{% if output.get('estimate_label') %}<span>{{ output.get('estimate_label') }}</span>{% endif %}{% if output.get('estimated_hours') is not none %}<span>{{ output.get('estimated_hours') }} hrs</span>{% endif %}{% if output.get('estimated_cost') is not none %}<span>{{ output.get('estimated_cost') }}</span>{% endif %}</div>
+      {% endif %}
+    {% else %}
+      <p class="trace-empty">No draft action found.</p>
+    {% endif %}
   {% else %}
     <p class="trace-empty">No stage output captured.</p>
   {% endif %}
+  {% if output %}<details class="raw-trace"><summary>Raw JSON</summary><pre>{{ output|tojson(indent=2) }}</pre></details>{% endif %}
 {%- endmacro %}

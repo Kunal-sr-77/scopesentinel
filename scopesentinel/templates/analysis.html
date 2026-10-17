@@ -11,7 +11,7 @@
     <section class="analysis-hero" aria-labelledby="analysis-title">
       <div class="analysis-hero-copy">
         <div class="hero-topline"><span class="request-id">{{ analysis.request_id }}</span>{{ approval_badge(analysis.approval_status) }}</div>
-        <h1 id="analysis-title">Request review</h1>
+        <h1 id="analysis-title">{{ analysis.request_heading }}</h1>
         <p class="hero-project">{{ analysis.project_name|default('Project workspace', true) }}</p>
       </div>
       <div class="decision-card {{ classification_class(analysis.classification) }}">
@@ -72,6 +72,9 @@
         {% if analysis.scheduling_flag %}
           <div class="flag-callout"><span aria-hidden="true">!</span><div><strong>Scheduling flag</strong><p>{{ analysis.scheduling_flag }}</p></div></div>
         {% endif %}
+        {% if analysis.decision_rules %}
+          <div class="subsection-label">Decision rules</div>{{ tag_list(analysis.decision_rules, 'neutral') }}
+        {% endif %}
       </article>
 
       <article class="panel-card draft-card">
@@ -109,7 +112,7 @@
               <div class="trace-stage-head"><span class="trace-stage-number">0{{ loop.index }}</span><span class="trace-stage-status">{{ stage.status|default('pending', true) }}</span></div>
               <h3>{{ stage.label }}</h3>
               <span class="trace-stage-key">{{ stage.key }}</span>
-              {{ pipeline_output(stage.output) }}
+              {{ pipeline_output(stage.key, stage.output) }}
             </li>
           {% endfor %}
         </ol>

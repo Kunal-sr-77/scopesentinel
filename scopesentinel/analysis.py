@@ -565,6 +565,86 @@ def classify_request(parsed: ParseOutput, retrieved: RetrieveOutput, agreement: 
     if scheduling_flag == "deadline_conflict":
         classification = Classification.NEEDS_CLARIFICATION
 
+    evidence_reference = ", ".join(evidence_ids) if evidence_ids else "none"
+    passed_checks: list[str] = []
+    for item in parsed.items:
+        if "revision" in item.concepts:
+            limit = next(
+                (clause for clause in agreement.clauses if clause.subtype == "revision_round"),
+                None,
+            )
+            requested_round = _round_number(item)
+            if (
+                limit
+                and requested_round is not None
+                and limit.quantity is not None
+                and requested_round <= limit.quantity
+            ):
+                passed_checks.append(
+                    f"revision round {int(requested_round)} is within the allowance in {limit.id}"
+                )
+        if _is_page_item(item) and _explicit_page_request(item):
+            deliverable = _page_deliverable(agreement)
+            usage = _page_usage(agreement)
+            if (
+                deliverable
+                and deliverable.quantity is not None
+                and usage is not None
+                and item.quantity is not None
+                and usage + item.quantity <= deliverable.quantity
+            ):
+                passed_checks.append(
+                    f"the requested quantity fits within the allowance in {deliverable.id}"
+                )
+        if "seo metadata" in item.concepts and "d-seo-metadata" in evidence_ids:
+            passed_checks.append("the requested metadata matches the included SEO metadata clause d-seo-metadata")
+    if has_schedule and scheduling_flag is None and deadline and _date_in(parsed.normalized_text) == (
+        deadline.qualifiers[0] if deadline.qualifiers else None
+    ):
+        passed_checks.append(f"the requested date matches the deadline in {deadline.id}")
+
+    prior_rationale = next(iter(dict.fromkeys(rationale)), None)
+    if classification is Classification.IN_SCOPE:
+        checks = "; ".join(passed_checks) or "no exclusion, quantity, revision, or scheduling conflict was found"
+        rationale = [
+            f"Cited clause IDs {evidence_reference} support this request, and {checks}.",
+        ]
+        rules.extend(
+            (
+                "supporting_evidence_is_required",
+                "all_applicable_limits_and_exclusions_passed",
+            )
+        )
+    elif classification is Classification.POTENTIALLY_OUT_OF_SCOPE:
+        out_reasons: list[str] = []
+        if any(hit.clause_type is ClauseType.EXCLUSION for hit in retrieved.hits):
+            out_reasons.append("the request matches work explicitly excluded by the agreement")
+        if "deliverable_quantity_is_checked_against_current_usage" in rules:
+            out_reasons.append("the requested quantity exceeds the included deliverable allowance")
+        if "revision_round_allowance_is_inclusive" in rules:
+            out_reasons.append("the requested revision round exceeds the included allowance")
+        detail = " and ".join(out_reasons) or (prior_rationale or "an exclusion or allowance check requires scope review")
+        detail = detail.rstrip(".!? ")
+        rationale = [
+            f"Cited clause IDs {evidence_reference} indicate that {detail[0].lower() + detail[1:]}.",
+        ]
+        rules.append("explicit_exclusion_or_exceeded_limit_requires_scope_review")
+    else:
+        if scheduling_flag == "deadline_conflict":
+            reason = "the requested date conflicts with the agreed deadline"
+        elif "no_matching_clause" in tags:
+            reason = "no matching contractual evidence was found"
+        elif "contradictory_evidence_requires_clarification" in rules:
+            reason = "relevant agreement clauses contradict one another"
+        elif tags:
+            reason = "the request contains unresolved or ambiguous details"
+        else:
+            reason = "the available evidence does not resolve the request"
+        rationale = [
+            f"Cited clause IDs {evidence_reference} were retrieved, but clarification is required because {reason}.",
+        ]
+        rules.append("uncertainty_or_conflict_requires_human_clarification")
+
     return ClassifyOutput(
         classification=classification,
         rationale=rationale,

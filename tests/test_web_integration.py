@@ -49,7 +49,11 @@ class WebWorkflowTests(unittest.TestCase):
         detail = self.client.get(created.location)
         self.assertEqual(detail.status_code, 200)
         self.assertIn(b"Up to 5 responsive marketing pages.", detail.data)
+        self.assertIn(b"Please revise the existing homepage hero", detail.data)
         self.assertIn(b"Analysis pipeline", detail.data)
+        self.assertIn(b"Decision rules", detail.data)
+        self.assertIn(b"Raw JSON", detail.data)
+        self.assertNotIn(b"No rationale was captured", detail.data)
         self.assertIn(b"Human checkpoint", detail.data)
 
         request_id = created.location.rsplit("/", 1)[-1]

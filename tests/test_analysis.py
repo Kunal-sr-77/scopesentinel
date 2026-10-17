@@ -30,6 +30,16 @@ def _request(case_id: str) -> Request:
 
 
 class FixedWorkedExampleTests(unittest.TestCase):
+    def test_every_evaluation_result_has_rationale_and_decision_rules(self) -> None:
+        for case in EVALUATION_CASES:
+            with self.subTest(case=case.id):
+                result = analyze_request(
+                    _request(case.id), evaluation_agreement(case.agreement_variant)
+                )
+                self.assertTrue(result.trace.classify.rationale)
+                self.assertTrue(all(sentence.strip() for sentence in result.trace.classify.rationale))
+                self.assertTrue(result.trace.classify.decision_rules)
+
     def test_cases_a_to_e_have_the_frozen_classification_evidence_and_tags(self) -> None:
         for case_id in ("A", "B", "C", "D", "E"):
             with self.subTest(case=case_id):

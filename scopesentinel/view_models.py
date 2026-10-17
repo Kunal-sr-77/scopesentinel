@@ -36,9 +36,11 @@ class AnalysisViewModel:
     request_id: str
     project_name: str
     client_request: str
+    request_heading: str
     classification: Classification
     classification_label: str
     rationale: tuple[str, ...] = ()
+    decision_rules: tuple[str, ...] = ()
     uncertainty_tags: tuple[str, ...] = ()
     scheduling_flag: str | None = None
     evidence: tuple[EvidenceViewModel, ...] = ()
