@@ -25,10 +25,11 @@ charge approval, or contract modification.
 
 ## Current status
 
-Step 1 is complete: the domain interfaces, JSON persistence boundary, Flask
-application shell, pinned runtime, lockfile, Dockerfile, and offline test
-command are established. Analysis and UI behavior are intentionally not yet
-implemented in this skeleton.
+The Step 1 skeleton is committed: the domain interfaces, JSON persistence
+boundary, Flask application shell, pinned runtime, lockfile, Dockerfile, and
+offline test command are established. Analysis and UI behavior are intentionally
+not yet implemented in this skeleton. A clean Docker build and the
+network-isolated container test are required gates before UI work begins.
 
 ## Architecture
 
