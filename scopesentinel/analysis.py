@@ -152,16 +152,17 @@ def _preserves_existing(text: str, subject: str) -> bool:
 
 def _request_quantity(text: str) -> float | None:
     quantity_words = "\\d+|one|two|three|four|five|six|seven|eight|nine|ten"
+    page_descriptor = r"(?!(?:few|several|some|couple|more)\b)(?:[a-z][a-z-]*\s+)?"
     page_pattern = (
         rf"\b({quantity_words})\s+(?:new\s+|additional\s+|extra\s+|more\s+)?"
-        r"(?:(?:marketing|landing|case[- ]study)\s+)?pages?\b"
+        rf"{page_descriptor}pages?\b"
     )
     match = re.search(page_pattern, text)
     if match:
         return _number_value(_number(match.group(1)))
     article_match = re.search(
         r"\b(an?|one)\s+(?:new\s+|additional\s+|extra\s+)?"
-        r"(?:(?:marketing|landing|case[- ]study)\s+)?pages?\b",
+        rf"{page_descriptor}pages?\b",
         text,
     )
     return 1 if article_match else None
@@ -579,7 +580,10 @@ def classify_request(parsed: ParseOutput, retrieved: RetrieveOutput, agreement: 
             hit
             for hit in retrieved.hits
             if (clause := _clause_for(hit.clause_id, agreement)) is not None
-            and (_concept_match(item, clause) or hit.relation == "context")
+            and (
+                _concept_match(item, clause)
+                or (hit.relation == "context" and hit.clause_type is ClauseType.RATE)
+            )
         ]
         if not item_hits and not item.ambiguity_tags:
             classification = Classification.NEEDS_CLARIFICATION

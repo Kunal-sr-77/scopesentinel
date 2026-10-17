@@ -100,3 +100,13 @@ class WebWorkflowTests(unittest.TestCase):
         self.assertIn("up to 5 pages", body)
         self.assertIn("strategy/keyword research", body)
         self.assertIn("excluded", body)
+
+    def test_history_and_dashboard_rows_lead_with_request_text_and_mute_request_id(self) -> None:
+        request_text = "Please add a testimonials page."
+        created = self.client.post("/requests/new", data={"request_text": request_text})
+        request_id = created.location.rsplit("/", 1)[-1]
+
+        for path in ("/", "/history"):
+            body = self.client.get(path).get_data(as_text=True)
+            self.assertIn(f"<strong>{request_text}</strong>", body)
+            self.assertIn(f'<span class="request-id">{request_id}</span>', body)

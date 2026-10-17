@@ -19,7 +19,7 @@
       <div class="history-list">
         {% for item in dashboard.history %}
           <a class="history-row history-row-detailed" href="{{ analysis_url|default('#', true) }}{{ item.request_id }}">
-            <span class="history-row-main"><strong>{{ item.request_id }}</strong><span>{{ item.client_request|default('No request text available.', true) }}</span></span>
+            <span class="history-row-main"><strong>{{ item.client_request|default('No request text available.', true) }}</strong><span class="request-id">{{ item.request_id }}</span></span>
             <span>{{ classification_badge(item, true) }}</span>
             <span>{{ approval_badge(item.approval_status) }}</span>
             <span class="history-row-arrow" aria-hidden="true">→</span>

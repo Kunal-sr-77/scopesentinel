@@ -210,6 +210,33 @@ class EvidenceAndEstimateTests(unittest.TestCase):
         self.assertNotEqual(result.classification, Classification.POTENTIALLY_OUT_OF_SCOPE)
         self.assertIn("does not trigger the exclusion", " ".join(result.trace.classify.rationale).lower())
 
+    def test_preserved_logo_context_does_not_add_excluded_work_to_page_request(self) -> None:
+        result = analyze_request(
+            "Please leave the existing logo alone and add a testimonials page.",
+            evaluation_agreement("four_pages_used"),
+        )
+
+        self.assertEqual(result.classification, Classification.IN_SCOPE)
+        self.assertNotIn("excluded_work", result.trace.classify.uncertainty_tags)
+        self.assertEqual(result.draft.estimated_hours, 4)
+        self.assertEqual(result.draft.estimated_cost, 500)
+        self.assertEqual(
+            [(hit.clause_id, hit.relation) for hit in result.trace.retrieve.hits],
+            [("d-marketing-pages", "supports"), ("x-logo-design", "context")],
+        )
+
+    def test_implied_page_quantity_drives_remaining_capacity_and_estimate(self) -> None:
+        text = "Please add a testimonials page."
+        remaining = analyze_request(text, evaluation_agreement("four_pages_used"))
+        exhausted = analyze_request(text, evaluation_agreement())
+
+        self.assertEqual(remaining.trace.parse.items[0].quantity, 1)
+        self.assertEqual(remaining.trace.parse.items[0].unit, "page")
+        self.assertEqual(remaining.classification, Classification.IN_SCOPE)
+        self.assertEqual(exhausted.classification, Classification.POTENTIALLY_OUT_OF_SCOPE)
+        self.assertEqual(exhausted.draft.estimated_hours, 4)
+        self.assertEqual(exhausted.draft.estimated_cost, 500)
+
     def test_empty_request_is_clarification(self) -> None:
         result = analyze_request("", evaluation_agreement())
 
