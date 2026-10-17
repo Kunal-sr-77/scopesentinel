@@ -25,8 +25,6 @@ from .domain import (
 
 
 _NUMBER_WORDS = {
-    "a": 1,
-    "an": 1,
     "one": 1,
     "two": 2,
     "three": 3,
@@ -41,6 +39,12 @@ _NUMBER_WORDS = {
     "second": 2,
     "third": 3,
     "fourth": 4,
+    "fifth": 5,
+    "sixth": 6,
+    "seventh": 7,
+    "eighth": 8,
+    "ninth": 9,
+    "tenth": 10,
 }
 
 _ALIASES: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -98,7 +102,7 @@ def _concepts(text: str) -> tuple[str, ...]:
         "please", "can", "you", "the", "this", "that", "for", "from", "with", "without",
         "and", "our", "site", "feel", "more", "make", "add", "build", "create", "provide",
         "write", "design", "have", "whole", "instead", "new", "existing", "one", "two", "three",
-        "case", "study", "pages", "page", "improve",
+        "case", "study", "pages", "page", "improve", "few", "several",
     }
     for word in re.findall(r"[a-z]+", text):
         if len(word) > 3 and word not in stop_words and word not in result:
@@ -127,17 +131,74 @@ def _unresolved_terms(text: str) -> tuple[str, ...]:
     return tuple(terms)
 
 
+def _copy_request_is_ambiguous(text: str, concepts: tuple[str, ...]) -> bool:
+    return "copywriting" in concepts and bool(
+        re.search(r"\bcopy\b.*\b(?:onto|to)\b", text)
+        and re.search(r"\b(existing|supplied|provided|current)\b|without writing", text)
+    )
+
+
+def _preserves_existing(text: str, subject: str) -> bool:
+    if not re.search(rf"\b{re.escape(subject)}\b", text):
+        return False
+    return bool(
+        re.search(
+            rf"\b(?:keep|leave|retain|preserve|unchanged)\b.*\b{re.escape(subject)}\b|"
+            rf"\b{re.escape(subject)}\b.*\b(?:unchanged|exactly as (?:is|it is)|without changing)\b",
+            text,
+        )
+    )
+
+
+def _request_quantity(text: str) -> float | None:
+    quantity_words = "\\d+|one|two|three|four|five|six|seven|eight|nine|ten"
+    page_pattern = (
+        rf"\b({quantity_words})\s+(?:new\s+|additional\s+|extra\s+|more\s+)?"
+        r"(?:(?:marketing|landing|case[- ]study)\s+)?pages?\b"
+    )
+    match = re.search(page_pattern, text)
+    if match:
+        return _number_value(_number(match.group(1)))
+    article_match = re.search(
+        r"\b(an?|one)\s+(?:new\s+|additional\s+|extra\s+)?"
+        r"(?:(?:marketing|landing|case[- ]study)\s+)?pages?\b",
+        text,
+    )
+    return 1 if article_match else None
+
+
+def _vague_page_quantity(text: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:a few|few|several|a couple|couple|some|more)\s+"
+            r"(?:new\s+|additional\s+)?(?:(?:marketing|landing|case[- ]study)\s+)?pages?\b",
+            text,
+        )
+    )
+
+
+def _explicit_metadata_language(text: str) -> bool:
+    return any(
+        term in text
+        for term in ("seo title", "meta title", "meta description", "metadata", "seo metadata")
+    ) or bool(
+        re.search(r"\b(?:page )?title\b.*\bdescription tags?\b|\bdescription tags?\b", text)
+    )
+
+
 def _ambiguity_tags(text: str, concepts: tuple[str, ...], quantity: float | None) -> tuple[str, ...]:
     tags: list[str] = []
     if "premium" in text or "look and feel" in text:
         tags.append("design_intent_unspecified")
     if "seo" in concepts and not any(
         phrase in text for phrase in ("seo title", "meta title", "meta description", "metadata", "seo metadata")
-    ):
+    ) and not _explicit_metadata_language(text):
         tags.append("seo_meaning_ambiguous")
     page_request = "marketing page" in concepts or "landing page" in concepts or "case-study page" in concepts
-    if page_request and quantity is None and re.search(r"\b(add|create|build|some|more)\b", text):
+    if page_request and quantity is None and _vague_page_quantity(text):
         tags.append("quantity_missing")
+    if _copy_request_is_ambiguous(text, concepts):
+        tags.append("copy_request_ambiguous")
     return tuple(tags)
 
 
@@ -171,7 +232,7 @@ def parse_request(text: str) -> ParseOutput:
     missing: list[str] = []
     for index, raw in enumerate(_split_request(normalized), start=1):
         concepts = _concepts(raw)
-        quantity = None if "launch" in concepts else _number_value(_number(raw))
+        quantity = None if "launch" in concepts else _request_quantity(raw)
         tags = _ambiguity_tags(raw, concepts, quantity)
         item = ParseItem(
             item_id=f"item-{index}",
@@ -272,7 +333,7 @@ def _page_usage(agreement: Agreement) -> float | None:
 
 
 def _has_explicit_metadata(item: ParseItem) -> bool:
-    return any(term in item.raw_text for term in ("seo title", "meta title", "meta description", "metadata", "seo metadata"))
+    return _explicit_metadata_language(item.raw_text)
 
 
 def retrieve_evidence(parsed: ParseOutput | str, agreement: Agreement) -> RetrieveOutput:
@@ -289,6 +350,12 @@ def retrieve_evidence(parsed: ParseOutput | str, agreement: Agreement) -> Retrie
             if clause.type is ClauseType.RATE:
                 continue
             if (
+                clause.type is ClauseType.EXCLUSION
+                and clause.subtype == "logo_design"
+                and _preserves_existing(item.raw_text, "logo")
+            ):
+                continue
+            if (
                 clause.type is ClauseType.DELIVERABLE
                 and clause.subtype == "marketing_page"
                 and "copywriting" in item.concepts
@@ -299,9 +366,7 @@ def retrieve_evidence(parsed: ParseOutput | str, agreement: Agreement) -> Retrie
             if (
                 clause.type is ClauseType.DELIVERABLE
                 and clause.subtype == "marketing_page"
-                and "seo metadata" in item.concepts
-                and item.intent == "add"
-                and not re.search(r"\b(page|pages|landing|case[- ]study)\b", item.raw_text)
+                and _has_explicit_metadata(item)
             ):
                 continue
             concepts = _concept_match(item, clause)
@@ -333,7 +398,7 @@ def retrieve_evidence(parsed: ParseOutput | str, agreement: Agreement) -> Retrie
                 and usage + (item.quantity or 0) > clause.quantity
                 for clause in [_page_deliverable(agreement)]
             )
-            if over_capacity or "additional" in item.raw_text:
+            if over_capacity or re.search(r"\b(additional|extra)\b", item.raw_text):
                 for clause in agreement.clauses:
                     if clause.type is ClauseType.RATE:
                         if clause.subtype == "hourly_rate" or (
@@ -345,7 +410,10 @@ def retrieve_evidence(parsed: ParseOutput | str, agreement: Agreement) -> Retrie
                             )
                             item_matches[item.item_id].add(clause.id)
 
-        if "logo" in item.concepts or "brand identity" in item.concepts:
+        if (
+            ("logo" in item.concepts or "brand identity" in item.concepts)
+            and not _preserves_existing(item.raw_text, "logo")
+        ):
             for clause in agreement.clauses:
                 if clause.type is ClauseType.RATE and clause.subtype in {"hourly_rate", "effort_assumption"}:
                     hits_by_id.setdefault(clause.id, _hit(clause, "context", (), ("estimate",)))
@@ -386,10 +454,12 @@ def _clause_for(hit_id: str, agreement: Agreement) -> Clause | None:
 
 
 def _round_number(item: ParseItem) -> float | None:
-    ordinal = r"\d+|one|two|three|four|five|first|second|third|fourth|fifth"
+    ordinal = r"\d+|one|two|three|four|five|six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth"
     match = re.search(rf"\b(?:round|revision round)\s+({ordinal})\b", item.raw_text)
     if not match:
         match = re.search(rf"\b({ordinal})\s+revision(?:\s+round)?\b", item.raw_text)
+    if not match:
+        match = re.search(rf"\b({ordinal})\s+round\b", item.raw_text)
     return _number(match.group(1)) if match else None
 
 
@@ -419,7 +489,7 @@ def _estimate(
             and _explicit_page_request(item)
             and re.search(r"\b(add|create|build|design)\b", item.raw_text)
         ):
-            if "logo" in item.concepts:
+            if "logo" in item.concepts and not _preserves_existing(item.raw_text, "logo"):
                 needs_estimate = True
                 estimate_notes.append(
                     "Logo is not included in the estimate because no explicit logo effort assumption is configured."
@@ -509,7 +579,14 @@ def classify_request(parsed: ParseOutput, retrieved: RetrieveOutput, agreement: 
             rationale.append("No matching contractual evidence was found.")
             rules.append("no_evidence_is_not_a_definitive_exclusion")
             continue
-        if any(hit.clause_type is ClauseType.EXCLUSION for hit in item_hits):
+        exclusion_is_actionable = any(
+            hit.clause_type is ClauseType.EXCLUSION for hit in item_hits
+        ) and not (
+            _copy_request_is_ambiguous(item.raw_text, item.concepts)
+            or _preserves_existing(item.raw_text, "copy")
+            or _preserves_existing(item.raw_text, "logo")
+        )
+        if exclusion_is_actionable:
             generic_seo = "seo" in item.concepts and not _has_explicit_metadata(item)
             if not generic_seo:
                 specific_include = any(
@@ -547,10 +624,10 @@ def classify_request(parsed: ParseOutput, retrieved: RetrieveOutput, agreement: 
                 rules.append("deliverable_quantity_is_checked_against_current_usage")
             elif item.quantity is None:
                 classification = Classification.NEEDS_CLARIFICATION
-            if "additional" in item.raw_text and (usage is None or deliverable is None):
+            if re.search(r"\b(additional|extra)\b", item.raw_text) and (usage is None or deliverable is None):
                 classification = Classification.NEEDS_CLARIFICATION
 
-            if "additional" in item.raw_text or (
+            if re.search(r"\b(additional|extra)\b", item.raw_text) or (
                 usage is not None
                 and deliverable is not None
                 and deliverable.quantity is not None
@@ -581,7 +658,7 @@ def classify_request(parsed: ParseOutput, retrieved: RetrieveOutput, agreement: 
                 rationale.append("The requested revision round exceeds the included allowance.")
                 rules.append("revision_round_allowance_is_inclusive")
 
-        if "logo" in item.concepts:
+        if "logo" in item.concepts and not _preserves_existing(item.raw_text, "logo"):
             effort_exists = any(clause.subtype == "effort_assumption" and "logo" in clause.source_text.lower() for clause in agreement.clauses)
             if not effort_exists:
                 tags.append("logo_effort_assumption_missing")

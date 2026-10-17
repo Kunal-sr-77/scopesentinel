@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from datetime import datetime, timezone
 from dataclasses import fields
 from pathlib import Path
 from typing import Any
@@ -32,12 +33,25 @@ class JsonHistoryStore:
 
     def __init__(self, path: Path):
         self.path = Path(path)
+        self.last_notice: str | None = None
 
     def list_records(self) -> list[HistoryRecord]:
         if not self.path.exists():
             return []
-        with self.path.open("r", encoding="utf-8") as handle:
-            payload = json.load(handle)
+        try:
+            with self.path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except json.JSONDecodeError:
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            corrupt_path = self.path.with_name(
+                f"{self.path.stem}.corrupt-{timestamp}{self.path.suffix}"
+            )
+            os.replace(self.path, corrupt_path)
+            self.last_notice = (
+                f"Corrupted history was quarantined as {corrupt_path.name}. "
+                "Starting with empty history."
+            )
+            return []
         return [_record_from_dict(item) for item in payload]
 
     def save(self, record: HistoryRecord) -> None:

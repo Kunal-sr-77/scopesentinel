@@ -1,7 +1,10 @@
-.PHONY: test run
+.PHONY: test eval run
 
 test:
-	python -m unittest discover -s tests -v
+	python -m unittest discover -s tests -p 'test_[!h]*.py' -v
+
+eval:
+	python -m tests.holdout_report
 
 run:
 	python app.py

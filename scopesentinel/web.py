@@ -68,6 +68,7 @@ def create_app(store: JsonHistoryStore | None = None) -> Flask:
             "history_url": url_for("history_page"),
             "setup_url": url_for("setup"),
             "analysis_url": "/requests/",
+            "history_notice": history_store().last_notice,
         }
 
     def view_model(record: HistoryRecord) -> AnalysisViewModel:

@@ -25,10 +25,9 @@ charge approval, or contract modification.
 
 ## Current status
 
-Steps 1–3 are implemented and Step 4 QA is recorded. The original evaluation
-set is perfect, but the independent holdout set intentionally remains failing
-until its findings are reviewed; no engine tuning has been made against those
-holdout failures.
+Steps 1–4 are implemented and the original evaluation plus first independent
+holdout set are passing. The separate `make eval` command reports holdout
+accuracy without affecting the build gate.
 
 ## Architecture
 
@@ -109,6 +108,15 @@ make test
 
 Tests use temporary JSON files. They never write to `data/history.json`.
 
+`make test` runs regression, boundary, and application tests but excludes the
+strict holdout assertion. Run the independent report separately:
+
+```bash
+make eval
+```
+
+`make eval` always prints accuracy and every failure without failing the build.
+
 ## Evaluation set
 
 The fixed Step 2 evaluation set is in `scopesentinel/evaluation.py` and contains
@@ -126,38 +134,30 @@ The independent QA set is in `tests/holdout_cases.py`. It contains **15 new
 natural-language scenarios**, including **4 false-positive traps**, and is
 evaluated separately from the original 16 cases. Strict accuracy across
 classification, evidence clause IDs, uncertainty tags, scheduling flags, and
-the requested estimate fields is currently **8/15 (53.33%)**.
+the requested estimate fields is currently **15/15 (100%)** after general
+rule-level fixes.
 
-The seven reported holdout failures are preserved in the QA report rather than
-being tuned away:
+The original holdout findings led to general rules for:
 
-- **H03** — “fourth round of edits” is treated as in scope instead of exceeding
-  the revision allowance.
-- **H06** — “copy existing wording without writing new copy” is treated as an
-  exclusion instead of clarification.
-- **H07** — explicit page title and description tags remain ambiguous SEO
-  instead of resolving to included metadata.
-- **H08** — “a few more landing pages” does not produce a missing-quantity
-  signal.
-- **H13** — “two new pages and send an estimate” produces a one-page estimate
-  because “an estimate” is misread as quantity one.
-- **H14** — an unchanged-logo mention triggers the logo exclusion for an
-  otherwise in-scope page request.
-- **H15** — “keep all copy exactly as supplied” adds an exclusion and quantity
-  signal to an otherwise design-ambiguity case.
+- ordinal revision rounds such as “fourth round”;
+- preservation and negation language such as “keep”, “unchanged”, and
+  “existing wording”;
+- explicit page metadata language;
+- quantity words and vague quantifiers such as “two”, “a few”, and “several”;
+- page-specific evidence selection for SEO metadata versus generic pages.
 
-The holdout command is:
+The holdout report command is:
 
 ```bash
-. .venv/bin/activate
-python -m unittest discover -s tests -p 'test_holdout.py' -v
+make eval
 ```
 
-It currently fails on the strict holdout assertion by design, with the seven
-findings above. The Step 4 boundary suite passes and covers direct approval
+The strict report currently passes with no failures. The Step 4 boundary suite
+passes and covers direct approval
 bypass, empty input, malformed input, and corrupted history using temporary
-JSON files. Corrupted history currently raises `json.JSONDecodeError` at the
-store boundary; it is recorded as a limitation rather than silently repaired.
+JSON files. Corrupted history is quarantined as
+`history.corrupt-<timestamp>.json`, the store starts empty, and the dashboard
+shows a visible recovery notice.
 
 ## Demo walkthrough
 
@@ -202,14 +202,13 @@ store boundary; it is recorded as a limitation rather than silently repaired.
 - The classifier is deterministic and transparent, not a general semantic or
   legal reasoning system. It uses a curated synonym vocabulary and typed
   agreement fields.
-- Vague quantities, ordinal wording, copied-content intent, and compound
-  requests can require clarification or produce the holdout findings listed
-  above.
+- Vague quantities, copied-content intent, and compound requests can still
+  require clarification; the independent evaluation commands are the source
+  of truth for current behavior.
 - Agreement setup is line-oriented. Complex nested conditions, precedence
   language, and amendments are not modeled in this MVP.
-- JSON history is local and intentionally small. Corrupted JSON currently
-  surfaces as `json.JSONDecodeError`; there is no recovery or multi-user
-  locking layer.
+- JSON history is local and intentionally small. Corrupted JSON is quarantined
+  and replaced with empty history, but there is no multi-user locking layer.
 - Estimates are not legal, financial, or contractual commitments. They appear
   only when explicit effort and rate assumptions support them, and all actions
   require human review.

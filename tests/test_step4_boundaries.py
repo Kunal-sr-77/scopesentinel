@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -57,11 +56,14 @@ class Step4BoundaryTests(unittest.TestCase):
         self.assertEqual(self.store.list_records(), [])
         self.assertFalse(self.history_path.exists())
 
-    def test_corrupted_history_json_records_current_store_finding(self) -> None:
+    def test_corrupted_history_json_is_quarantined_and_visible_in_ui(self) -> None:
         self.history_path.write_text("{ not valid JSON", encoding="utf-8")
 
-        with self.assertRaises(json.JSONDecodeError):
-            self.store.list_records()
+        self.assertEqual(self.store.list_records(), [])
+        quarantined = list(self.history_path.parent.glob("history.corrupt-*.json"))
+        self.assertEqual(len(quarantined), 1)
+        self.assertFalse(self.history_path.exists())
+        self.assertIn("Corrupted history was quarantined", self.client.get("/").get_data(as_text=True))
 
 
 if __name__ == "__main__":

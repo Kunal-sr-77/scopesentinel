@@ -60,6 +60,7 @@
         </header>
 
         <main class="main-content" id="main-content">
+          {% if history_notice %}<div class="history-notice" role="alert"><span aria-hidden="true">!</span><span>{{ history_notice }}</span></div>{% endif %}
           {% block content %}{% endblock %}
         </main>
 
