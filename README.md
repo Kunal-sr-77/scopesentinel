@@ -25,11 +25,10 @@ charge approval, or contract modification.
 
 ## Current status
 
-The Step 1 skeleton is committed: the domain interfaces, JSON persistence
-boundary, Flask application shell, pinned runtime, lockfile, Dockerfile, and
-offline test command are established. Analysis and UI behavior are intentionally
-not yet implemented in this skeleton. A clean Docker build and the
-network-isolated container test are required gates before UI work begins.
+Steps 1–3 are implemented and Step 4 QA is recorded. The original evaluation
+set is perfect, but the independent holdout set intentionally remains failing
+until its findings are reviewed; no engine tuning has been made against those
+holdout failures.
 
 ## Architecture
 
@@ -120,6 +119,103 @@ IDs, uncertainty tags, and scheduling flag where applicable. The measured
 evaluation accuracy is **16/16 (100%)** in the latest integrated run. This is
 strict accuracy across classification, evidence clause IDs, uncertainty tags,
 and scheduling flags; it is not a legal or contractual accuracy claim.
+
+### Independent Step 4 holdout
+
+The independent QA set is in `tests/holdout_cases.py`. It contains **15 new
+natural-language scenarios**, including **4 false-positive traps**, and is
+evaluated separately from the original 16 cases. Strict accuracy across
+classification, evidence clause IDs, uncertainty tags, scheduling flags, and
+the requested estimate fields is currently **8/15 (53.33%)**.
+
+The seven reported holdout failures are preserved in the QA report rather than
+being tuned away:
+
+- **H03** — “fourth round of edits” is treated as in scope instead of exceeding
+  the revision allowance.
+- **H06** — “copy existing wording without writing new copy” is treated as an
+  exclusion instead of clarification.
+- **H07** — explicit page title and description tags remain ambiguous SEO
+  instead of resolving to included metadata.
+- **H08** — “a few more landing pages” does not produce a missing-quantity
+  signal.
+- **H13** — “two new pages and send an estimate” produces a one-page estimate
+  because “an estimate” is misread as quantity one.
+- **H14** — an unchanged-logo mention triggers the logo exclusion for an
+  otherwise in-scope page request.
+- **H15** — “keep all copy exactly as supplied” adds an exclusion and quantity
+  signal to an otherwise design-ambiguity case.
+
+The holdout command is:
+
+```bash
+. .venv/bin/activate
+python -m unittest discover -s tests -p 'test_holdout.py' -v
+```
+
+It currently fails on the strict holdout assertion by design, with the seven
+findings above. The Step 4 boundary suite passes and covers direct approval
+bypass, empty input, malformed input, and corrupted history using temporary
+JSON files. Corrupted history currently raises `json.JSONDecodeError` at the
+store boundary; it is recorded as a limitation rather than silently repaired.
+
+## Demo walkthrough
+
+1. Start the app with `python app.py` and open <http://localhost:8000>.
+2. Open **Project setup** to review or edit the sample Northstar agreement.
+   Current page usage is editable; the sample starts with five marketing pages
+   delivered, a two-round revision allowance, and the configured rate and page
+   effort assumption.
+3. Choose **New request** and paste:
+
+   ```text
+   Please revise the existing homepage hero during revision round two.
+   ```
+
+   The detail page shows `IN_SCOPE`, the exact deliverable and revision clauses,
+   the four-stage trace, and a confirmation draft.
+4. Submit:
+
+   ```text
+   Please improve SEO.
+   ```
+
+   The clarification draft asks whether the client means included metadata or
+   excluded strategy/keyword research.
+5. Submit:
+
+   ```text
+   Please add two case-study pages and design a new logo.
+   ```
+
+   The page shows `POTENTIALLY_OUT_OF_SCOPE`, the page-capacity and logo
+   exclusion evidence, and the partial estimate:
+   `2 pages × 4 hours/page = 8 estimated hours; 8 hours × $125/hour = $1,000`.
+   The logo is explicitly excluded from that estimate because it has no effort
+   assumption.
+6. Review the evidence and draft, check the acknowledgment box, and approve.
+   Approval only records a local review; it never sends a message, approves a
+   charge, or modifies a contract. Visit **History** to see the saved record.
+
+## Limitations
+
+- The classifier is deterministic and transparent, not a general semantic or
+  legal reasoning system. It uses a curated synonym vocabulary and typed
+  agreement fields.
+- Vague quantities, ordinal wording, copied-content intent, and compound
+  requests can require clarification or produce the holdout findings listed
+  above.
+- Agreement setup is line-oriented. Complex nested conditions, precedence
+  language, and amendments are not modeled in this MVP.
+- JSON history is local and intentionally small. Corrupted JSON currently
+  surfaces as `json.JSONDecodeError`; there is no recovery or multi-user
+  locking layer.
+- Estimates are not legal, financial, or contractual commitments. They appear
+  only when explicit effort and rate assumptions support them, and all actions
+  require human review.
+- The current buildathon environment has not verified a clean Docker build in
+  this sandbox when base-image layer extraction rejects `lchown`; the exact
+  Docker commands remain documented for a Docker-capable Linux host.
 
 ## Safety boundaries
 
