@@ -113,6 +113,30 @@ class EvidenceAndEstimateTests(unittest.TestCase):
         self.assertIsNone(incomplete.draft.estimated_hours)
         self.assertIsNone(incomplete.draft.estimated_cost)
 
+    def test_mixed_request_keeps_supported_page_estimate_when_logo_effort_is_missing(self) -> None:
+        result = analyze_request(
+            "Please add two case-study pages and design a new logo.",
+            evaluation_agreement(),
+        )
+
+        self.assertEqual(result.draft.estimated_hours, 8)
+        self.assertEqual(result.draft.estimated_cost, 1000)
+        self.assertIn("2 pages", result.draft.estimate_label)
+        self.assertIn("4 hours", result.draft.estimate_label)
+        self.assertIn("8 estimated hours", result.draft.estimate_label)
+        self.assertIn("$1,000", result.draft.estimate_label)
+        self.assertIn("logo", result.draft.estimate_label.lower())
+        self.assertIn("not included", result.draft.estimate_label.lower())
+
+        rationale = " ".join(result.trace.classify.rationale).lower()
+        self.assertIn("d-marketing-pages", rationale)
+        self.assertIn("x-logo-design", rationale)
+        self.assertIn("5 of 5", rationale)
+        self.assertIn("2 more", rationale)
+        self.assertIn("r-page-effort", rationale)
+        self.assertIn("r-hourly-rate", rationale)
+        self.assertNotIn("case-study pages are excluded", rationale)
+
     def test_contradictory_typed_clauses_require_clarification(self) -> None:
         agreement = Agreement(
             clauses=[

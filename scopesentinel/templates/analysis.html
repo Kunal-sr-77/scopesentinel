@@ -67,13 +67,13 @@
           <ul class="reason-list">{% for reason in analysis.rationale %}<li><span aria-hidden="true">↳</span>{{ reason }}</li>{% endfor %}</ul>
         {% else %}<p class="muted-copy">No rationale was captured for this analysis.</p>{% endif %}
         {% if analysis.uncertainty_tags %}
-          <div class="subsection-label">Uncertainty signals</div>{{ tag_list(analysis.uncertainty_tags, 'amber') }}
+          <div class="subsection-label">Uncertainty signals</div>{{ tag_list(analysis.uncertainty_tags, 'amber', true) }}
         {% endif %}
         {% if analysis.scheduling_flag %}
           <div class="flag-callout"><span aria-hidden="true">!</span><div><strong>Scheduling flag</strong><p>{{ analysis.scheduling_flag }}</p></div></div>
         {% endif %}
         {% if analysis.decision_rules %}
-          <div class="subsection-label">Decision rules</div>{{ tag_list(analysis.decision_rules, 'neutral') }}
+          <div class="subsection-label">Decision rules</div>{{ tag_list(analysis.decision_rules, 'neutral', true) }}
         {% endif %}
       </article>
 
@@ -85,7 +85,7 @@
           <p class="draft-body">{{ analysis.draft.body }}</p>
           {% if analysis.draft.assumptions %}
             <div class="subsection-label">Assumptions</div>
-            <ul class="assumption-list">{% for assumption in analysis.draft.assumptions %}<li>{{ assumption }}</li>{% endfor %}</ul>
+            {{ tag_list(analysis.draft.assumptions, 'amber', true) }}
           {% endif %}
           {% if analysis.draft.estimate_label or analysis.draft.estimated_hours is not none or analysis.draft.estimated_cost is not none %}
             <div class="estimate-strip">
@@ -96,6 +96,10 @@
                 {% if analysis.draft.estimated_cost is not none %}<span>{{ analysis.draft.estimated_cost }}</span>{% endif %}
               </div>
             </div>
+          {% endif %}
+          {% if analysis.draft.estimate_notes %}
+            <div class="subsection-label">Estimate notes</div>
+            <ul class="assumption-list">{% for note in analysis.draft.estimate_notes %}<li>{{ note }}</li>{% endfor %}</ul>
           {% endif %}
         {% else %}
           {{ empty_state('No proposed action yet', 'A draft response or change order will appear here when the analysis provides one.') }}

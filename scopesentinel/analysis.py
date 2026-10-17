@@ -392,15 +392,26 @@ def _round_number(item: ParseItem) -> float | None:
     return _number(match.group(1)) if match else None
 
 
-def _estimate(parsed: ParseOutput, agreement: Agreement) -> tuple[float | None, float | None, str | None]:
+def _display_number(value: float) -> str:
+    return str(int(value)) if value.is_integer() else f"{value:g}"
+
+
+def _display_currency(value: float) -> str:
+    return f"{value:,.0f}" if value.is_integer() else f"{value:,.2f}"
+
+
+def _estimate(
+    parsed: ParseOutput,
+    agreement: Agreement,
+) -> tuple[float | None, float | None, str | None, list[str]]:
     rate = next(
         (clause.quantity for clause in agreement.clauses if clause.subtype == "hourly_rate" and clause.quantity is not None),
         agreement.pricing_rules.get("hourly_rate"),
     )
     effort_by_key = agreement.pricing_rules.get("effort_hours", {})
-    efforts: list[float] = []
+    efforts: list[tuple[float, float, float]] = []
+    estimate_notes: list[str] = []
     needs_estimate = False
-    missing = False
     for item in parsed.items:
         if not (
             _is_page_item(item)
@@ -409,9 +420,16 @@ def _estimate(parsed: ParseOutput, agreement: Agreement) -> tuple[float | None, 
         ):
             if "logo" in item.concepts:
                 needs_estimate = True
-                missing = True
+                estimate_notes.append(
+                    "Logo is not included in the estimate because no explicit logo effort assumption is configured."
+                )
             continue
         needs_estimate = True
+        if item.quantity is None:
+            estimate_notes.append(
+                "The page item is not included in the estimate because its quantity is unspecified."
+            )
+            continue
         key = "additional_marketing_page"
         effort = effort_by_key.get(key) if isinstance(effort_by_key, dict) else None
         if effort is None:
@@ -421,15 +439,35 @@ def _estimate(parsed: ParseOutput, agreement: Agreement) -> tuple[float | None, 
             )
             effort = effort_clause.quantity if effort_clause else None
         if effort is None:
-            missing = True
+            estimate_notes.append(
+                "The page item is not included in the estimate because no explicit page effort assumption is configured."
+            )
         else:
-            efforts.append(float(effort) * float(item.quantity or 1))
+            quantity = float(item.quantity)
+            effort_per_item = float(effort)
+            efforts.append((quantity, effort_per_item, quantity * effort_per_item))
     if not needs_estimate:
-        return None, None, None
-    if missing or rate is None:
-        return None, None, "Estimate unavailable: an explicit effort assumption and hourly rate are required."
-    hours = sum(efforts)
-    return hours, hours * float(rate), "Estimate based on explicit agreement assumptions."
+        return None, None, None, []
+    if not efforts or rate is None:
+        return (
+            None,
+            None,
+            "Estimate unavailable: an explicit effort assumption and hourly rate are required.",
+            estimate_notes,
+        )
+    hours = sum(total for _, _, total in efforts)
+    cost = hours * float(rate)
+    formula = "; ".join(
+        f"{_display_number(quantity)} pages × {_display_number(effort)} hours/page = {_display_number(total)} estimated hours"
+        for quantity, effort, total in efforts
+    )
+    label = (
+        f"Estimate: {formula}; {_display_number(hours)} hours × "
+        f"${_display_currency(float(rate))}/hour = ${_display_currency(cost)}."
+    )
+    if estimate_notes:
+        label = f"{label} {' '.join(estimate_notes)}"
+    return hours, cost, label, estimate_notes
 
 
 def classify_request(parsed: ParseOutput, retrieved: RetrieveOutput, agreement: Agreement) -> ClassifyOutput:
@@ -565,7 +603,14 @@ def classify_request(parsed: ParseOutput, retrieved: RetrieveOutput, agreement: 
     if scheduling_flag == "deadline_conflict":
         classification = Classification.NEEDS_CLARIFICATION
 
-    evidence_reference = ", ".join(evidence_ids) if evidence_ids else "none"
+    scope_evidence_ids = [
+        hit.clause_id
+        for hit in retrieved.hits
+        if hit.clause_type in {ClauseType.DELIVERABLE, ClauseType.EXCLUSION, ClauseType.LIMIT}
+    ]
+    pricing_evidence_ids = [
+        hit.clause_id for hit in retrieved.hits if hit.clause_type is ClauseType.RATE
+    ]
     passed_checks: list[str] = []
     for item in parsed.items:
         if "revision" in item.concepts:
@@ -607,8 +652,12 @@ def classify_request(parsed: ParseOutput, retrieved: RetrieveOutput, agreement: 
     if classification is Classification.IN_SCOPE:
         checks = "; ".join(passed_checks) or "no exclusion, quantity, revision, or scheduling conflict was found"
         rationale = [
-            f"Cited clause IDs {evidence_reference} support this request, and {checks}.",
+            f"Scope evidence clauses {', '.join(scope_evidence_ids) or 'none'} support this request, and {checks}.",
         ]
+        if pricing_evidence_ids:
+            rationale.append(
+                f"Pricing context clauses {', '.join(pricing_evidence_ids)} are separate calculation inputs and do not determine scope."
+            )
         rules.extend(
             (
                 "supporting_evidence_is_required",
@@ -617,17 +666,46 @@ def classify_request(parsed: ParseOutput, retrieved: RetrieveOutput, agreement: 
         )
     elif classification is Classification.POTENTIALLY_OUT_OF_SCOPE:
         out_reasons: list[str] = []
-        if any(hit.clause_type is ClauseType.EXCLUSION for hit in retrieved.hits):
-            out_reasons.append("the request matches work explicitly excluded by the agreement")
+        for item in parsed.items:
+            related_exclusions: list[EvidenceHit] = []
+            for hit in retrieved.hits:
+                clause = _clause_for(hit.clause_id, agreement)
+                if (
+                    hit.clause_type is ClauseType.EXCLUSION
+                    and clause is not None
+                    and _concept_match(item, clause)
+                ):
+                    related_exclusions.append(hit)
+            for hit in related_exclusions:
+                subject = "logo request" if "logo" in item.concepts else "request"
+                out_reasons.append(f"the {subject} matches exclusion {hit.clause_id}")
         if "deliverable_quantity_is_checked_against_current_usage" in rules:
-            out_reasons.append("the requested quantity exceeds the included deliverable allowance")
+            for item in parsed.items:
+                if not (_is_page_item(item) and item.quantity is not None):
+                    continue
+                deliverable = _page_deliverable(agreement)
+                usage = _page_usage(agreement)
+                if deliverable and deliverable.quantity is not None and usage is not None:
+                    out_reasons.append(
+                        f"the page allowance in {deliverable.id} is used up ({_display_number(float(usage))} of {_display_number(float(deliverable.quantity))} delivered, so {_display_number(float(item.quantity))} more would exceed it)"
+                    )
+                    break
         if "revision_round_allowance_is_inclusive" in rules:
             out_reasons.append("the requested revision round exceeds the included allowance")
-        detail = " and ".join(out_reasons) or (prior_rationale or "an exclusion or allowance check requires scope review")
+        detail = " and ".join(dict.fromkeys(out_reasons)) or (prior_rationale or "an exclusion or allowance check requires scope review")
         detail = detail.rstrip(".!? ")
         rationale = [
-            f"Cited clause IDs {evidence_reference} indicate that {detail[0].lower() + detail[1:]}.",
+            f"Scope evidence clauses {', '.join(scope_evidence_ids) or 'none'} indicate that {detail[0].lower() + detail[1:]}.",
         ]
+        if pricing_evidence_ids:
+            if estimate_notes := _estimate(parsed, agreement)[3]:
+                rationale.append(
+                    f"Pricing context clauses {', '.join(pricing_evidence_ids)} support an estimate for the page work only; {' '.join(estimate_notes)}"
+                )
+            else:
+                rationale.append(
+                    f"Pricing context clauses {', '.join(pricing_evidence_ids)} are separate calculation inputs and do not determine scope."
+                )
         rules.append("explicit_exclusion_or_exceeded_limit_requires_scope_review")
     else:
         if scheduling_flag == "deadline_conflict":
@@ -641,7 +719,7 @@ def classify_request(parsed: ParseOutput, retrieved: RetrieveOutput, agreement: 
         else:
             reason = "the available evidence does not resolve the request"
         rationale = [
-            f"Cited clause IDs {evidence_reference} were retrieved, but clarification is required because {reason}.",
+            f"Scope evidence clauses {', '.join(scope_evidence_ids) or 'none'} were retrieved, but clarification is required because {reason}.",
         ]
         rules.append("uncertainty_or_conflict_requires_human_clarification")
 
@@ -657,7 +735,7 @@ def classify_request(parsed: ParseOutput, retrieved: RetrieveOutput, agreement: 
 
 
 def _draft(parsed: ParseOutput, classified: ClassifyOutput, agreement: Agreement) -> DraftAction:
-    hours, cost, estimate_label = _estimate(parsed, agreement)
+    hours, cost, estimate_label, estimate_notes = _estimate(parsed, agreement)
     if classified.classification is Classification.IN_SCOPE:
         kind, title = "response", "Confirm requested work"
         body = "The request is supported by the cited agreement clauses and can proceed to human review."
@@ -675,6 +753,7 @@ def _draft(parsed: ParseOutput, classified: ClassifyOutput, agreement: Agreement
         estimated_hours=hours,
         estimated_cost=cost,
         estimate_label=estimate_label,
+        estimate_notes=estimate_notes,
     )
 
 

@@ -73,3 +73,14 @@ class WebWorkflowTests(unittest.TestCase):
         response = self.client.post("/requests/new", data={"request_text": "   "})
         self.assertEqual(response.status_code, 400)
         self.assertEqual(self.store.list_records(), [])
+
+    def test_trace_humanizes_rule_labels_but_keeps_raw_identifiers_in_json(self) -> None:
+        created = self.client.post(
+            "/requests/new",
+            data={"request_text": "Please add two case-study pages and design a new logo."},
+        )
+        detail = self.client.get(created.location)
+        body = detail.get_data(as_text=True)
+
+        self.assertIn("Quantity checked against current usage", body)
+        self.assertIn("deliverable_quantity_is_checked_against_current_usage", body)

@@ -38,10 +38,26 @@
   </div>
 {%- endmacro %}
 
-{% macro tag_list(values, tone='neutral') -%}
+{% macro humanize_identifier(value) -%}
+  {% if value == 'deliverable_quantity_is_checked_against_current_usage' %}Quantity checked against current usage
+  {% elif value == 'revision_round_allowance_is_inclusive' %}Revision allowance checked
+  {% elif value == 'explicit_exclusion_is_actionable_evidence' %}Explicit exclusion checked
+  {% elif value == 'explicit_exclusion_or_exceeded_limit_requires_scope_review' %}Exclusion or exceeded limit requires scope review
+  {% elif value == 'supporting_evidence_is_required' %}Supporting evidence is required
+  {% elif value == 'all_applicable_limits_and_exclusions_passed' %}All applicable limits and exclusions passed
+  {% elif value == 'uncertainty_or_conflict_requires_human_clarification' %}Uncertainty or conflict requires clarification
+  {% elif value == 'estimate_effort_assumption_missing' %}Estimate effort assumption missing
+  {% elif value == 'logo_effort_assumption_missing' %}Logo effort assumption missing
+  {% elif value == 'current_usage_unknown' %}Current usage unknown
+  {% elif value == 'quantity_missing' %}Quantity missing
+  {% elif value == 'scheduling_conflict' %}Scheduling conflict
+  {% else %}{{ value|replace('_', ' ')|replace('-', ' ')|capitalize }}{% endif %}
+{%- endmacro %}
+
+{% macro tag_list(values, tone='neutral', humanize=false) -%}
   {% if values %}
     <div class="tag-list">
-      {% for value in values %}<span class="tag tag-{{ tone }}">{{ value }}</span>{% endfor %}
+      {% for value in values %}<span class="tag tag-{{ tone }}">{% if humanize %}{{ humanize_identifier(value) }}{% else %}{{ value }}{% endif %}</span>{% endfor %}
     </div>
   {% endif %}
 {%- endmacro %}
@@ -67,7 +83,7 @@
       <p class="trace-empty">No request items found.</p>
     {% endif %}
     {% if output.get('missing_information') %}
-      <div class="trace-subsection"><span class="trace-label">Missing information</span>{{ tag_list(output.get('missing_information'), 'amber') }}</div>
+      <div class="trace-subsection"><span class="trace-label">Missing information</span>{{ tag_list(output.get('missing_information'), 'amber', true) }}</div>
     {% endif %}
   {% elif stage_key == 'retrieve' %}
     {% if output.get('hits') %}
@@ -92,8 +108,8 @@
     {% set classification = output.get('classification', 'NEEDS_CLARIFICATION') %}
     <div class="trace-classification"><span class="overline">Classification</span><strong>{{ classification|replace('_', ' ')|title }}</strong></div>
     {% if output.get('rationale') %}<div class="trace-subsection"><span class="trace-label">Rationale</span><ul class="trace-list">{% for item in output.get('rationale') %}<li>{{ item }}</li>{% endfor %}</ul></div>{% endif %}
-    {% if output.get('decision_rules') %}<div class="trace-subsection"><span class="trace-label">Decision rules</span>{{ tag_list(output.get('decision_rules'), 'neutral') }}</div>{% endif %}
-    {% if output.get('uncertainty_tags') %}<div class="trace-subsection"><span class="trace-label">Uncertainty</span>{{ tag_list(output.get('uncertainty_tags'), 'amber') }}</div>{% endif %}
+    {% if output.get('decision_rules') %}<div class="trace-subsection"><span class="trace-label">Decision rules</span>{{ tag_list(output.get('decision_rules'), 'neutral', true) }}</div>{% endif %}
+    {% if output.get('uncertainty_tags') %}<div class="trace-subsection"><span class="trace-label">Uncertainty</span>{{ tag_list(output.get('uncertainty_tags'), 'amber', true) }}</div>{% endif %}
     {% if output.get('conflicting_clause_ids') %}<div class="trace-subsection"><span class="trace-label">Conflicting clauses</span>{{ tag_list(output.get('conflicting_clause_ids'), 'amber') }}</div>{% endif %}
     {% if output.get('scheduling_flag') %}<div class="trace-subsection"><span class="trace-label">Scheduling flag</span><strong>{{ output.get('scheduling_flag') }}</strong></div>{% endif %}
   {% elif stage_key == 'draft' %}
@@ -105,6 +121,7 @@
       {% if output.get('estimate_label') or output.get('estimated_hours') is not none or output.get('estimated_cost') is not none %}
         <div class="trace-estimate"><span class="trace-label">Estimate</span>{% if output.get('estimate_label') %}<span>{{ output.get('estimate_label') }}</span>{% endif %}{% if output.get('estimated_hours') is not none %}<span>{{ output.get('estimated_hours') }} hrs</span>{% endif %}{% if output.get('estimated_cost') is not none %}<span>{{ output.get('estimated_cost') }}</span>{% endif %}</div>
       {% endif %}
+      {% if output.get('estimate_notes') %}<div class="trace-subsection"><span class="trace-label">Estimate notes</span><ul class="trace-list">{% for note in output.get('estimate_notes') %}<li>{{ note }}</li>{% endfor %}</ul></div>{% endif %}
     {% else %}
       <p class="trace-empty">No draft action found.</p>
     {% endif %}
