@@ -57,7 +57,7 @@ _ALIASES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("logo", ("logo",)),
     ("brand identity", ("brand identity", "identity")),
     ("copywriting", ("copywriting", "copy", "marketing copy", "content writing", "write")),
-    ("revision", ("revision", "revise", "edit", "change")),
+    ("revision", ("revision", "revise", "edit", "change", "tweak", "round of changes", "round of edits", "round of tweaks")),
     ("launch", ("launch", "deadline", "delivery date")),
     ("design", ("design", "premium", "look and feel")),
 )
@@ -211,7 +211,10 @@ def _split_request(text: str) -> list[str]:
 
 
 def _intent(text: str) -> str | None:
-    if re.search(r"\b(revise|revision|edit|change)\b", text):
+    if re.search(r"\b(revise|revision|edit|change|tweak)\b", text) or re.search(
+        r"\b(?:\d+(?:st|nd|rd|th)|one|two|three|four|five)\s+round\s+of\s+(?:changes|edits|tweaks)\b",
+        text,
+    ):
         return "revise"
     if re.search(r"\b(add|create|build|design|write)\b", text):
         return "add"
@@ -350,12 +353,6 @@ def retrieve_evidence(parsed: ParseOutput | str, agreement: Agreement) -> Retrie
             if clause.type is ClauseType.RATE:
                 continue
             if (
-                clause.type is ClauseType.EXCLUSION
-                and clause.subtype == "logo_design"
-                and _preserves_existing(item.raw_text, "logo")
-            ):
-                continue
-            if (
                 clause.type is ClauseType.DELIVERABLE
                 and clause.subtype == "marketing_page"
                 and "copywriting" in item.concepts
@@ -377,10 +374,14 @@ def retrieve_evidence(parsed: ParseOutput | str, agreement: Agreement) -> Retrie
                     continue
             if clause.type is ClauseType.EXCLUSION and "seo" in item.concepts and _has_explicit_metadata(item):
                 continue
-            relation = "excludes" if clause.type is ClauseType.EXCLUSION else "supports"
+            preserved_logo = clause.subtype == "logo_design" and _preserves_existing(item.raw_text, "logo")
+            relation = "context" if preserved_logo else (
+                "excludes" if clause.type is ClauseType.EXCLUSION else "supports"
+            )
             if clause.type is ClauseType.LIMIT:
                 relation = "limits"
-            hit = _hit(clause, relation, concepts)
+            constraints = ("preservation",) if preserved_logo else ()
+            hit = _hit(clause, relation, concepts, constraints)
             matched_ids.add(clause.id)
             hits_by_id.setdefault(clause.id, hit)
         item_matches[item.item_id] = matched_ids
@@ -454,13 +455,17 @@ def _clause_for(hit_id: str, agreement: Agreement) -> Clause | None:
 
 
 def _round_number(item: ParseItem) -> float | None:
-    ordinal = r"\d+|one|two|three|four|five|six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth"
+    ordinal = r"\d+(?:st|nd|rd|th)|one|two|three|four|five|six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth"
     match = re.search(rf"\b(?:round|revision round)\s+({ordinal})\b", item.raw_text)
     if not match:
         match = re.search(rf"\b({ordinal})\s+revision(?:\s+round)?\b", item.raw_text)
     if not match:
         match = re.search(rf"\b({ordinal})\s+round\b", item.raw_text)
-    return _number(match.group(1)) if match else None
+    if not match:
+        return None
+    token = match.group(1)
+    digit_ordinal = re.fullmatch(r"(\d+)(?:st|nd|rd|th)", token)
+    return float(digit_ordinal.group(1)) if digit_ordinal else _number(token)
 
 
 def _display_number(value: float) -> str:
@@ -549,7 +554,11 @@ def classify_request(parsed: ParseOutput, retrieved: RetrieveOutput, agreement: 
     rules: list[str] = []
     scheduling_flag: str | None = None
     classification = Classification.IN_SCOPE
-    evidence_ids = [hit.clause_id for hit in retrieved.hits]
+    evidence_ids = [
+        hit.clause_id
+        for hit in retrieved.hits
+        if "preservation" not in hit.matched_constraints
+    ]
 
     deadline = next((clause for clause in agreement.clauses if clause.type is ClauseType.DEADLINE), None)
     has_schedule = any("launch" in item.concepts or item.intent == "schedule" for item in parsed.items)
@@ -725,6 +734,15 @@ def classify_request(parsed: ParseOutput, retrieved: RetrieveOutput, agreement: 
         deadline.qualifiers[0] if deadline.qualifiers else None
     ):
         passed_checks.append(f"the requested date matches the deadline in {deadline.id}")
+    for item in parsed.items:
+        if "logo" in item.concepts and _preserves_existing(item.raw_text, "logo"):
+            logo_clause = next(
+                (hit.clause_id for hit in retrieved.hits if hit.clause_id == "x-logo-design"),
+                "x-logo-design",
+            )
+            passed_checks.append(
+                f"the logo is kept as-is, so {logo_clause} is context and does not trigger the exclusion"
+            )
 
     prior_rationale = next(iter(dict.fromkeys(rationale)), None)
     if classification is Classification.IN_SCOPE:
@@ -862,7 +880,9 @@ def _clarification_questions(
     if classified.scheduling_flag == "deadline_conflict":
         questions.append("Should we keep the agreed launch deadline, or would you like to request a schedule change for review?")
     if "no_matching_clause" in classified.uncertainty_tags:
-        questions.append("Which agreed deliverable or contract clause should this request be evaluated against?")
+        questions.append(
+            "This request does not match any listed deliverable or exclusion. Please confirm whether it is new work that should be reviewed as a potential scope change."
+        )
     if classified.conflicting_clause_ids:
         questions.append(
             f"Which agreement language should govern: {', '.join(classified.conflicting_clause_ids)}?"

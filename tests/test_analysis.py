@@ -191,6 +191,25 @@ class EvidenceAndEstimateTests(unittest.TestCase):
         self.assertIn("no_matching_clause", result.trace.classify.uncertainty_tags)
         self.assertNotIn("excluded_work", result.trace.classify.uncertainty_tags)
 
+    def test_no_evidence_draft_uses_plain_new_work_question(self) -> None:
+        result = analyze_request(_request("K"), evaluation_agreement())
+
+        questions = " ".join(result.draft.clarification_questions).lower()
+        self.assertIn("does not match any listed deliverable or exclusion", questions)
+        self.assertIn("confirm whether it is new work", questions)
+        self.assertNotIn("which agreed deliverable or contract clause", questions)
+
+    def test_preserved_logo_is_context_evidence_not_an_exclusion(self) -> None:
+        parsed = parse_request("Please keep the logo as is and update the footer.")
+        retrieved = retrieve_evidence(parsed, evaluation_agreement())
+        result = analyze_request("Please keep the logo as is and update the footer.", evaluation_agreement())
+
+        logo_hit = next(hit for hit in retrieved.hits if hit.clause_id == "x-logo-design")
+        self.assertEqual(logo_hit.relation, "context")
+        self.assertIn("preservation", logo_hit.matched_constraints)
+        self.assertNotEqual(result.classification, Classification.POTENTIALLY_OUT_OF_SCOPE)
+        self.assertIn("does not trigger the exclusion", " ".join(result.trace.classify.rationale).lower())
+
     def test_empty_request_is_clarification(self) -> None:
         result = analyze_request("", evaluation_agreement())
 
@@ -199,6 +218,23 @@ class EvidenceAndEstimateTests(unittest.TestCase):
 
 
 class RequestParsingTests(unittest.TestCase):
+    def test_digit_ordinals_one_through_five_drive_revision_scope(self) -> None:
+        expected = {
+            "1st": Classification.IN_SCOPE,
+            "2nd": Classification.IN_SCOPE,
+            "3rd": Classification.POTENTIALLY_OUT_OF_SCOPE,
+            "4th": Classification.POTENTIALLY_OUT_OF_SCOPE,
+            "5th": Classification.POTENTIALLY_OUT_OF_SCOPE,
+        }
+        for ordinal, classification in expected.items():
+            with self.subTest(ordinal=ordinal):
+                text = f"Can you do a {ordinal} round of changes on the pricing page?"
+                parsed = parse_request(text)
+                result = analyze_request(text, evaluation_agreement())
+                self.assertEqual(parsed.items[0].intent, "revise")
+                self.assertEqual(result.classification, classification)
+                self.assertIn("l-revision-rounds", result.evidence_clause_ids)
+
     def test_concept_chips_drop_phrase_fragments_and_repeated_noise(self) -> None:
         parsed = parse_request("Please improve SEO and add two case-study pages; improve the layout.")
         concepts = [concept for item in parsed.items for concept in item.concepts]
