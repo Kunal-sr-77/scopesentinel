@@ -5,6 +5,7 @@ test:
 
 eval:
 	python -m tests.holdout_report
+	python -m tests.fresh_holdout_report
 
 run:
 	python app.py

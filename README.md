@@ -159,6 +159,15 @@ JSON files. Corrupted history is quarantined as
 `history.corrupt-<timestamp>.json`, the store starts empty, and the dashboard
 shows a visible recovery notice.
 
+### Fresh post-fix holdout
+
+The QA agent added a separate set of exactly **10 fresh scenarios**, H16–H25,
+in `tests/fresh_holdout_cases.py`, with **4 false-positive traps** and different
+client phrasing from the first holdout. Its strict accuracy is separately
+reported as **10/10 (100%)**, with no failures. `make eval` prints both the
+15-case original holdout result and this fresh 10-case result without failing
+the build.
+
 ## Demo walkthrough
 
 1. Start the app with `python app.py` and open <http://localhost:8000>.
