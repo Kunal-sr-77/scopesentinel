@@ -12,11 +12,17 @@ from typing import Any
 from .domain import (
     AnalysisResult,
     ApprovalStatus,
+    ClassifyOutput,
+    ClauseType,
     Classification,
     DraftAction,
+    EvidenceHit,
     HistoryRecord,
+    ParseItem,
+    ParseOutput,
     PipelineTrace,
     Request,
+    RetrieveOutput,
     to_dict,
 )
 
@@ -67,7 +73,7 @@ def _record_from_dict(payload: dict[str, Any]) -> HistoryRecord:
         uncertainty_reasons=result_data.get("uncertainty_reasons", []),
         conflicting_clause_ids=result_data.get("conflicting_clause_ids", []),
         scheduling_flag=result_data.get("scheduling_flag"),
-        trace=PipelineTrace(**trace_data),
+        trace=_pipeline_from_dict(trace_data),
         draft=draft,
     )
     return HistoryRecord(
@@ -76,3 +82,41 @@ def _record_from_dict(payload: dict[str, Any]) -> HistoryRecord:
         approval_status=ApprovalStatus(payload.get("approval_status", ApprovalStatus.PENDING_REVIEW.value)),
         approved_at=payload.get("approved_at"),
     )
+
+
+def _pipeline_from_dict(payload: dict[str, Any]) -> PipelineTrace:
+    parse_data = payload.get("parse", {})
+    retrieve_data = payload.get("retrieve", {})
+    classify_data = payload.get("classify", {})
+    parse = ParseOutput(
+        normalized_text=parse_data.get("normalized_text", ""),
+        items=[ParseItem(**item) for item in parse_data.get("items", [])],
+        missing_information=parse_data.get("missing_information", []),
+    )
+    retrieve = RetrieveOutput(
+        hits=[
+            EvidenceHit(
+                **{
+                    **item,
+                    "clause_type": ClauseType(item["clause_type"]),
+                }
+            )
+            for item in retrieve_data.get("hits", [])
+        ],
+        conflict_clause_ids=retrieve_data.get("conflict_clause_ids", []),
+        retrieval_notes=retrieve_data.get("retrieval_notes", []),
+    )
+    classify = ClassifyOutput(
+        classification=Classification(
+            classify_data.get("classification", Classification.NEEDS_CLARIFICATION.value)
+        ),
+        rationale=classify_data.get("rationale", []),
+        evidence_clause_ids=classify_data.get("evidence_clause_ids", []),
+        uncertainty_tags=classify_data.get("uncertainty_tags", []),
+        conflicting_clause_ids=classify_data.get("conflicting_clause_ids", []),
+        scheduling_flag=classify_data.get("scheduling_flag"),
+        decision_rules=classify_data.get("decision_rules", []),
+    )
+    draft_data = payload.get("draft")
+    draft = DraftAction(**draft_data) if draft_data else None
+    return PipelineTrace(parse=parse, retrieve=retrieve, classify=classify, draft=draft)

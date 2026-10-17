@@ -8,12 +8,19 @@ from pathlib import Path
 from scopesentinel.domain import (
     Agreement,
     AnalysisResult,
+    ClassifyOutput,
     Classification,
     Clause,
     ClauseType,
+    DraftAction,
+    EvidenceHit,
     HistoryRecord,
+    ParseItem,
+    ParseOutput,
+    PipelineTrace,
     Project,
     Request,
+    RetrieveOutput,
     to_dict,
 )
 from scopesentinel.store import JsonHistoryStore
@@ -60,6 +67,46 @@ class SkeletonTests(unittest.TestCase):
         self.assertEqual(loaded[0].request.id, "request-1")
         self.assertEqual(loaded[0].result.classification, Classification.NEEDS_CLARIFICATION)
         self.assertFalse(Path("data/history.json").exists())
+
+    def test_nonempty_pipeline_trace_round_trips_with_typed_stage_outputs(self) -> None:
+        trace = PipelineTrace(
+            parse=ParseOutput(
+                normalized_text="add a page",
+                items=[ParseItem(item_id="item-1", raw_text="add a page", intent="add")],
+            ),
+            retrieve=RetrieveOutput(
+                hits=[
+                    EvidenceHit(
+                        clause_id="d-pages",
+                        clause_type=ClauseType.DELIVERABLE,
+                        source_text="Up to 5 pages.",
+                        relation="supports",
+                    )
+                ]
+            ),
+            classify=ClassifyOutput(
+                classification=Classification.IN_SCOPE,
+                rationale=["The requested page is within the allowance."],
+            ),
+            draft=DraftAction(kind="response", title="Confirm", body="We can proceed."),
+        )
+        record = HistoryRecord(
+            request=Request(id="request-trace", project_id="project-1", text="Add a page."),
+            result=AnalysisResult(
+                request_id="request-trace",
+                classification=Classification.IN_SCOPE,
+                trace=trace,
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = JsonHistoryStore(Path(directory) / "history.json")
+            store.save(record)
+            loaded = store.list_records()[0]
+
+        self.assertEqual(loaded.result.trace.parse.items[0].intent, "add")
+        self.assertEqual(loaded.result.trace.retrieve.hits[0].clause_id, "d-pages")
+        self.assertEqual(loaded.result.trace.classify.classification, Classification.IN_SCOPE)
+        self.assertEqual(loaded.result.trace.draft.title, "Confirm")
 
     def test_health_endpoint_is_local_and_deterministic(self) -> None:
         client = create_app().test_client()

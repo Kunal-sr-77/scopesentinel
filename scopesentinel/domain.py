@@ -80,13 +80,76 @@ class Request:
 
 
 @dataclass
-class PipelineTrace:
-    """Visible outputs from each deterministic analysis stage."""
+class ParseItem:
+    """Normalized representation of one requested action."""
 
-    parse: dict[str, Any] = field(default_factory=dict)
-    retrieve: dict[str, Any] = field(default_factory=dict)
-    classify: dict[str, Any] = field(default_factory=dict)
-    draft: dict[str, Any] = field(default_factory=dict)
+    item_id: str
+    raw_text: str
+    intent: str | None = None
+    concepts: tuple[str, ...] = ()
+    quantity: float | None = None
+    unit: str | None = None
+    qualifiers: tuple[str, ...] = ()
+    unresolved_terms: tuple[str, ...] = ()
+    ambiguity_tags: tuple[str, ...] = ()
+
+
+@dataclass
+class ParseOutput:
+    """Visible output of the request parsing stage."""
+
+    normalized_text: str = ""
+    items: list[ParseItem] = field(default_factory=list)
+    missing_information: list[str] = field(default_factory=list)
+
+
+@dataclass
+class EvidenceHit:
+    """One source-preserving clause returned by evidence retrieval."""
+
+    clause_id: str
+    clause_type: ClauseType
+    source_text: str
+    relation: str
+    relevance_score: float = 0.0
+    matched_concepts: tuple[str, ...] = ()
+    matched_constraints: tuple[str, ...] = ()
+
+
+@dataclass
+class RetrieveOutput:
+    """Visible output of the typed evidence retrieval stage."""
+
+    hits: list[EvidenceHit] = field(default_factory=list)
+    conflict_clause_ids: list[str] = field(default_factory=list)
+    retrieval_notes: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ClassifyOutput:
+    """Visible output of the deterministic decision stage."""
+
+    classification: Classification = Classification.NEEDS_CLARIFICATION
+    rationale: list[str] = field(default_factory=list)
+    evidence_clause_ids: list[str] = field(default_factory=list)
+    uncertainty_tags: list[str] = field(default_factory=list)
+    conflicting_clause_ids: list[str] = field(default_factory=list)
+    scheduling_flag: str | None = None
+    decision_rules: list[str] = field(default_factory=list)
+
+
+@dataclass
+class PipelineTrace:
+    """Visible outputs from each deterministic analysis stage.
+
+    These four fields are the integration boundary between the analysis agent
+    and the web agent. Each stage must be populated and serializable.
+    """
+
+    parse: ParseOutput = field(default_factory=ParseOutput)
+    retrieve: RetrieveOutput = field(default_factory=RetrieveOutput)
+    classify: ClassifyOutput = field(default_factory=ClassifyOutput)
+    draft: DraftAction | None = None
 
 
 @dataclass
