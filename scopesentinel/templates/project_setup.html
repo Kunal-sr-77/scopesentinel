@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% set page_title = 'Project setup' %}
+{% set active_nav = 'setup' %}
+{% set breadcrumb = 'Project setup' %}
+
+{% block content %}
+  <section class="page-intro" aria-labelledby="setup-title">
+    <div>
+      <span class="eyebrow">Project setup</span>
+      <h1 id="setup-title">Put the agreement in view.</h1>
+      <p class="lede">Enter one source clause per line. Current usage is editable so quantity limits reflect what has already been delivered.</p>
+    </div>
+  </section>
+
+  {% if error %}<div class="flag-callout" role="alert"><span aria-hidden="true">!</span><div><strong>Setup could not be saved</strong><p>{{ error }}</p></div></div>{% endif %}
+
+  <form class="setup-form" action="{{ setup_url|default('/setup', true) }}" method="post">
+    <section class="form-card" aria-labelledby="project-details-title">
+      <div class="card-heading"><div><span class="eyebrow">Workspace</span><h2 id="project-details-title">Project details</h2></div></div>
+      <div class="form-grid form-grid-two">
+        <div class="field-group"><label for="project-name">Project name</label><input id="project-name" name="project_name" required value="{{ values.get('project_name', '') }}"></div>
+        <div class="field-group"><label for="client-name">Client name</label><input id="client-name" name="client_name" required value="{{ values.get('client_name', '') }}"></div>
+      </div>
+    </section>
+
+    <section class="form-card" aria-labelledby="agreement-title">
+      <div class="card-heading"><div><span class="eyebrow">Agreement evidence</span><h2 id="agreement-title">Typed source clauses</h2></div><span class="required-note">One clause per line</span></div>
+      <div class="form-grid form-grid-two">
+        <div class="field-group"><label for="deliverables">Deliverables</label><textarea id="deliverables" name="deliverables" rows="5">{{ values.get('deliverables', '') }}</textarea></div>
+        <div class="field-group"><label for="exclusions">Exclusions</label><textarea id="exclusions" name="exclusions" rows="5">{{ values.get('exclusions', '') }}</textarea></div>
+        <div class="field-group"><label for="limits">Limits and allowances</label><textarea id="limits" name="limits" rows="5">{{ values.get('limits', '') }}</textarea></div>
+        <div class="field-group"><label for="deadlines">Deadlines</label><textarea id="deadlines" name="deadlines" rows="5">{{ values.get('deadlines', '') }}</textarea></div>
+        <div class="field-group field-group-wide"><label for="pricing">Pricing rules</label><textarea id="pricing" name="pricing" rows="4">{{ values.get('pricing', '') }}</textarea></div>
+      </div>
+    </section>
+
+    <section class="form-card" aria-labelledby="usage-title">
+      <div class="card-heading"><div><span class="eyebrow">Editable project state</span><h2 id="usage-title">Current usage and estimates</h2></div></div>
+      <div class="form-grid form-grid-three">
+        <div class="field-group"><label for="pages-delivered">Marketing pages delivered</label><input id="pages-delivered" name="pages_delivered" type="number" min="0" step="1" value="{{ values.get('pages_delivered', '') }}"><span class="field-help">Used to calculate remaining page capacity.</span></div>
+        <div class="field-group"><label for="hourly-rate">Additional-work rate</label><input id="hourly-rate" name="hourly_rate" type="number" min="0" step="0.01" value="{{ values.get('hourly_rate', '') }}"><span class="field-help">Leave blank if no rate is agreed.</span></div>
+        <div class="field-group"><label for="page-effort">Hours per additional page</label><input id="page-effort" name="page_effort" type="number" min="0" step="0.25" value="{{ values.get('page_effort', '') }}"><span class="field-help">Explicit assumption used only for labelled estimates.</span></div>
+      </div>
+      <div class="form-actions"><a class="button button-quiet" href="{{ dashboard_url|default('/', true) }}">Cancel</a><button class="button button-primary" type="submit">Save project setup <span aria-hidden="true">→</span></button></div>
+    </section>
+  </form>
+{% endblock %}

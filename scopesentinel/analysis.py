@@ -1,0 +1,633 @@
+"""Local deterministic request analysis pipeline."""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Iterable
+from dataclasses import dataclass
+
+from .domain import (
+    Agreement,
+    AnalysisResult,
+    Clause,
+    ClauseType,
+    ClassifyOutput,
+    Classification,
+    DraftAction,
+    EvidenceHit,
+    ParseItem,
+    ParseOutput,
+    PipelineTrace,
+    Project,
+    Request,
+    RetrieveOutput,
+)
+
+
+_NUMBER_WORDS = {
+    "a": 1,
+    "an": 1,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "first": 1,
+    "second": 2,
+    "third": 3,
+    "fourth": 4,
+}
+
+_ALIASES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("marketing page", ("marketing page", "landing page", "case-study page", "case study page", "homepage", "web page", "page")),
+    ("landing page", ("landing page",)),
+    ("case-study page", ("case-study page", "case study page")),
+    ("seo metadata", ("seo title", "meta title", "meta description", "seo metadata", "metadata")),
+    ("seo", ("seo",)),
+    ("seo strategy", ("seo strategy", "keyword research", "seo ranking", "seo rankings", "ranking")),
+    ("logo", ("logo",)),
+    ("brand identity", ("brand identity", "identity")),
+    ("copywriting", ("copywriting", "copy", "marketing copy", "content writing", "write")),
+    ("revision", ("revision", "revise", "edit", "change")),
+    ("launch", ("launch", "deadline", "delivery date")),
+    ("design", ("design", "premium", "look and feel")),
+)
+
+
+def _lower(text: str) -> str:
+    return re.sub(r"\s+", " ", text.lower()).strip()
+
+
+def _number(text: str) -> float | None:
+    match = re.search(r"(?<!\w)\d+(?:\.\d+)?", text)
+    if match:
+        return float(match.group())
+    for word, value in _NUMBER_WORDS.items():
+        if re.search(rf"\b{word}\b", text):
+            return float(value)
+    return None
+
+
+def _number_value(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return int(value) if value.is_integer() else value
+
+
+def _unit(text: str, concepts: tuple[str, ...]) -> str | None:
+    if "revision" in concepts or re.search(r"\b(round|rounds)\b", text):
+        return "revision_round"
+    if "marketing page" in concepts or "landing page" in concepts or "case-study page" in concepts:
+        return "page"
+    if re.search(r"\b(hours?|hrs?)\b", text):
+        return "hour"
+    return None
+
+
+def _concepts(text: str) -> tuple[str, ...]:
+    result: list[str] = []
+    for concept, aliases in _ALIASES:
+        if any(alias in text for alias in aliases) and concept not in result:
+            result.append(concept)
+    stop_words = {
+        "please", "can", "you", "the", "this", "that", "for", "from", "with", "without",
+        "and", "our", "site", "feel", "more", "make", "add", "build", "create", "provide",
+        "write", "design", "have", "whole", "instead", "new", "existing", "one", "two", "three",
+    }
+    for word in re.findall(r"[a-z]+", text):
+        if len(word) > 3 and word not in stop_words and word not in result:
+            result.append(word)
+    return tuple(result)
+
+
+def _qualifiers(text: str) -> tuple[str, ...]:
+    qualifiers: list[str] = []
+    for pattern, value in (
+        (r"\b(existing|new|whole site)\b", None),
+        (r"\bfor ([a-z][a-z -]+?)(?=\s*(?:,|\band\b|$))", "group"),
+        (r"\b(during revision round (?:\w+|\d+))\b", None),
+        (r"\bwithout ([a-z][a-z ]+?)(?=\s*(?:,|$))", None),
+    ):
+        for match in re.finditer(pattern, text):
+            qualifiers.append(match.group(1).strip() if value == "group" else match.group(0).strip())
+    return tuple(dict.fromkeys(qualifiers))
+
+
+def _unresolved_terms(text: str) -> tuple[str, ...]:
+    terms = []
+    for term in ("some", "premium", "better", "more", "appropriate", "etc"):
+        if re.search(rf"\b{re.escape(term)}\b", text):
+            terms.append(term)
+    return tuple(terms)
+
+
+def _ambiguity_tags(text: str, concepts: tuple[str, ...], quantity: float | None) -> tuple[str, ...]:
+    tags: list[str] = []
+    if "premium" in text or "look and feel" in text:
+        tags.append("design_intent_unspecified")
+    if "seo" in concepts and not any(
+        phrase in text for phrase in ("seo title", "meta title", "meta description", "metadata", "seo metadata")
+    ):
+        tags.append("seo_meaning_ambiguous")
+    page_request = "marketing page" in concepts or "landing page" in concepts or "case-study page" in concepts
+    if page_request and quantity is None and re.search(r"\b(add|create|build|some|more)\b", text):
+        tags.append("quantity_missing")
+    return tuple(tags)
+
+
+def _split_request(text: str) -> list[str]:
+    # Split only where the next fragment starts a new action. This keeps
+    # "SEO title and meta description" as one requested item.
+    pattern = r"(?:,\s*|\s+)and\s+(?=(?:add|design|build|create|write|revise|make|improve|have|confirm|launch)\b)"
+    parts = [part.strip(" ,") for part in re.split(pattern, text, flags=re.IGNORECASE)]
+    return [part for part in parts if part]
+
+
+def _intent(text: str) -> str | None:
+    if re.search(r"\b(revise|revision|edit|change)\b", text):
+        return "revise"
+    if re.search(r"\b(add|create|build|design|write)\b", text):
+        return "add"
+    if re.search(r"\b(improve|make|enhance)\b", text):
+        return "improve"
+    if re.search(r"\b(launch|confirm)\b", text):
+        return "schedule"
+    return None
+
+
+def parse_request(text: str) -> ParseOutput:
+    """Parse an untrusted request into normalized, typed request items."""
+
+    if not isinstance(text, str) or not text.strip():
+        return ParseOutput()
+    normalized = _lower(text)
+    items: list[ParseItem] = []
+    missing: list[str] = []
+    for index, raw in enumerate(_split_request(normalized), start=1):
+        concepts = _concepts(raw)
+        quantity = None if "launch" in concepts else _number_value(_number(raw))
+        tags = _ambiguity_tags(raw, concepts, quantity)
+        item = ParseItem(
+            item_id=f"item-{index}",
+            raw_text=raw,
+            intent=_intent(raw),
+            concepts=concepts,
+            quantity=quantity,
+            unit=_unit(raw, concepts),
+            qualifiers=_qualifiers(raw),
+            unresolved_terms=_unresolved_terms(raw),
+            ambiguity_tags=tags,
+        )
+        items.append(item)
+        for tag in tags:
+            if tag not in missing:
+                missing.append(tag)
+    return ParseOutput(normalized_text=normalized, items=items, missing_information=missing)
+
+
+def _canonical(value: str) -> str:
+    value = value.lower().replace("-", " ")
+    for concept, aliases in _ALIASES:
+        if value == concept or value in aliases:
+            return concept
+    return value
+
+
+def _concept_match(item: ParseItem, clause: Clause) -> tuple[str, ...]:
+    item_concepts = {_canonical(concept) for concept in item.concepts}
+    clause_concepts = {_canonical(concept) for concept in clause.concepts}
+    matched = item_concepts & clause_concepts
+    return tuple(sorted(matched))
+
+
+def _hit(clause: Clause, relation: str, matched: tuple[str, ...], constraints: Iterable[str] = ()) -> EvidenceHit:
+    return EvidenceHit(
+        clause_id=clause.id,
+        clause_type=clause.type,
+        source_text=clause.source_text,
+        relation=relation,
+        relevance_score=1.0 if relation != "context" else 0.5,
+        matched_concepts=matched,
+        matched_constraints=tuple(constraints),
+    )
+
+
+def _date_in(text: str) -> str | None:
+    match = re.search(r"\b(\d{1,2})\s+([a-z]+)\s+(\d{4})\b", text.lower())
+    if not match:
+        return None
+    months = {
+        "january": 1,
+        "february": 2,
+        "march": 3,
+        "april": 4,
+        "may": 5,
+        "june": 6,
+        "july": 7,
+        "august": 8,
+        "september": 9,
+        "october": 10,
+        "november": 11,
+        "december": 12,
+    }
+    month = months.get(match.group(2))
+    return f"{match.group(3)}-{month:02d}-{int(match.group(1)):02d}" if month else None
+
+
+def _is_page_item(item: ParseItem) -> bool:
+    return bool({"marketing page", "landing page", "case-study page"} & set(item.concepts))
+
+
+def _explicit_page_request(item: ParseItem) -> bool:
+    if "seo metadata" in item.concepts or "copywriting" in item.concepts:
+        return bool(re.search(r"\b(page|pages|landing|case[- ]study)\b", item.raw_text))
+    return bool(re.search(r"\b(page|pages|landing|homepage|case[- ]study)\b", item.raw_text))
+
+
+def _page_deliverable(agreement: Agreement) -> Clause | None:
+    return next(
+        (
+            clause
+            for clause in agreement.clauses
+            if clause.type is ClauseType.DELIVERABLE
+            and (
+                clause.subtype in {"marketing_page", "page"}
+                or "marketing page" in {_canonical(concept) for concept in clause.concepts}
+            )
+        ),
+        None,
+    )
+
+
+def _page_usage(agreement: Agreement) -> float | None:
+    if "marketing_page" in agreement.current_usage:
+        return agreement.current_usage["marketing_page"]
+    return agreement.current_usage.get("page")
+
+
+def _has_explicit_metadata(item: ParseItem) -> bool:
+    return any(term in item.raw_text for term in ("seo title", "meta title", "meta description", "metadata", "seo metadata"))
+
+
+def retrieve_evidence(parsed: ParseOutput | str, agreement: Agreement) -> RetrieveOutput:
+    """Retrieve typed source clauses without making a scope decision."""
+
+    if isinstance(parsed, str):
+        parsed = parse_request(parsed)
+
+    item_matches: dict[str, set[str]] = {}
+    hits_by_id: dict[str, EvidenceHit] = {}
+    for item in parsed.items:
+        matched_ids: set[str] = set()
+        for clause in agreement.clauses:
+            if clause.type is ClauseType.RATE:
+                continue
+            if (
+                clause.type is ClauseType.DELIVERABLE
+                and clause.subtype == "marketing_page"
+                and "copywriting" in item.concepts
+                and item.intent == "add"
+                and not re.search(r"\b(page|pages|landing|case[- ]study)\b", item.raw_text)
+            ):
+                continue
+            if (
+                clause.type is ClauseType.DELIVERABLE
+                and clause.subtype == "marketing_page"
+                and "seo metadata" in item.concepts
+                and item.intent == "add"
+                and not re.search(r"\b(page|pages|landing|case[- ]study)\b", item.raw_text)
+            ):
+                continue
+            concepts = _concept_match(item, clause)
+            if not concepts:
+                continue
+            if clause.type is ClauseType.DELIVERABLE and "seo" in item.concepts and not _has_explicit_metadata(item):
+                if "seo strategy" not in clause.concepts and "seo metadata" not in clause.concepts and "seo" not in clause.concepts:
+                    continue
+            if clause.type is ClauseType.EXCLUSION and "seo" in item.concepts and _has_explicit_metadata(item):
+                continue
+            relation = "excludes" if clause.type is ClauseType.EXCLUSION else "supports"
+            if clause.type is ClauseType.LIMIT:
+                relation = "limits"
+            hit = _hit(clause, relation, concepts)
+            matched_ids.add(clause.id)
+            hits_by_id.setdefault(clause.id, hit)
+        item_matches[item.item_id] = matched_ids
+
+        if (
+            _is_page_item(item)
+            and _explicit_page_request(item)
+            and re.search(r"\b(add|create|build)\b", item.raw_text)
+            and not any("launch" in candidate.concepts for candidate in parsed.items)
+        ):
+            usage = _page_usage(agreement)
+            over_capacity = usage is not None and any(
+                clause is not None
+                and clause.quantity is not None
+                and usage + (item.quantity or 0) > clause.quantity
+                for clause in [_page_deliverable(agreement)]
+            )
+            if over_capacity or "additional" in item.raw_text:
+                for clause in agreement.clauses:
+                    if clause.type is ClauseType.RATE:
+                        if clause.subtype == "hourly_rate" or (
+                            clause.subtype == "effort_assumption" and _is_page_item(item)
+                        ):
+                            hits_by_id.setdefault(
+                                clause.id,
+                                _hit(clause, "context", _concept_match(item, clause), ("estimate",)),
+                            )
+                            item_matches[item.item_id].add(clause.id)
+
+        if "logo" in item.concepts or "brand identity" in item.concepts:
+            for clause in agreement.clauses:
+                if clause.type is ClauseType.RATE and clause.subtype in {"hourly_rate", "effort_assumption"}:
+                    hits_by_id.setdefault(clause.id, _hit(clause, "context", (), ("estimate",)))
+                    item_matches[item.item_id].add(clause.id)
+
+    ordered_hits = [
+        _hit(clause, hits_by_id[clause.id].relation, hits_by_id[clause.id].matched_concepts, hits_by_id[clause.id].matched_constraints)
+        if clause.id in hits_by_id
+        else None
+        for clause in agreement.clauses
+    ]
+    hits = [hit for hit in ordered_hits if hit is not None]
+    conflict_ids: list[str] = []
+    for item in parsed.items:
+        related = [clause for clause in agreement.clauses if clause.id in item_matches[item.item_id]]
+        for included in related:
+            if included.type not in {ClauseType.DELIVERABLE, ClauseType.LIMIT}:
+                continue
+            for excluded in related:
+                if excluded.type is ClauseType.EXCLUSION and included.subtype == excluded.subtype:
+                    for clause_id in (included.id, excluded.id):
+                        if clause_id not in conflict_ids:
+                            conflict_ids.append(clause_id)
+    notes = []
+    if not hits:
+        notes.append("No typed agreement clause matched the request.")
+    if parsed.missing_information:
+        notes.append("The request contains unresolved or ambiguous terms.")
+    return RetrieveOutput(
+        hits=hits,
+        conflict_clause_ids=conflict_ids,
+        retrieval_notes=notes,
+    )
+
+
+def _clause_for(hit_id: str, agreement: Agreement) -> Clause | None:
+    return next((clause for clause in agreement.clauses if clause.id == hit_id), None)
+
+
+def _round_number(item: ParseItem) -> float | None:
+    ordinal = r"\d+|one|two|three|four|five|first|second|third|fourth|fifth"
+    match = re.search(rf"\b(?:round|revision round)\s+({ordinal})\b", item.raw_text)
+    if not match:
+        match = re.search(rf"\b({ordinal})\s+revision(?:\s+round)?\b", item.raw_text)
+    return _number(match.group(1)) if match else None
+
+
+def _estimate(parsed: ParseOutput, agreement: Agreement) -> tuple[float | None, float | None, str | None]:
+    rate = next(
+        (clause.quantity for clause in agreement.clauses if clause.subtype == "hourly_rate" and clause.quantity is not None),
+        agreement.pricing_rules.get("hourly_rate"),
+    )
+    effort_by_key = agreement.pricing_rules.get("effort_hours", {})
+    efforts: list[float] = []
+    needs_estimate = False
+    missing = False
+    for item in parsed.items:
+        if not (
+            _is_page_item(item)
+            and _explicit_page_request(item)
+            and re.search(r"\b(add|create|build|design)\b", item.raw_text)
+        ):
+            if "logo" in item.concepts:
+                needs_estimate = True
+                missing = True
+            continue
+        needs_estimate = True
+        key = "additional_marketing_page"
+        effort = effort_by_key.get(key) if isinstance(effort_by_key, dict) else None
+        if effort is None:
+            effort_clause = next(
+                (clause for clause in agreement.clauses if clause.subtype == "effort_assumption" and _is_page_item(item)),
+                None,
+            )
+            effort = effort_clause.quantity if effort_clause else None
+        if effort is None:
+            missing = True
+        else:
+            efforts.append(float(effort) * float(item.quantity or 1))
+    if not needs_estimate:
+        return None, None, None
+    if missing or rate is None:
+        return None, None, "Estimate unavailable: an explicit effort assumption and hourly rate are required."
+    hours = sum(efforts)
+    return hours, hours * float(rate), "Estimate based on explicit agreement assumptions."
+
+
+def classify_request(parsed: ParseOutput, retrieved: RetrieveOutput, agreement: Agreement) -> ClassifyOutput:
+    """Apply deterministic precedence rules after evidence retrieval."""
+
+    tags: list[str] = []
+    rationale: list[str] = []
+    rules: list[str] = []
+    scheduling_flag: str | None = None
+    classification = Classification.IN_SCOPE
+    evidence_ids = [hit.clause_id for hit in retrieved.hits]
+
+    deadline = next((clause for clause in agreement.clauses if clause.type is ClauseType.DEADLINE), None)
+    has_schedule = any("launch" in item.concepts or item.intent == "schedule" for item in parsed.items)
+    if has_schedule:
+        requested_date = _date_in(parsed.normalized_text)
+        agreed_date = deadline.qualifiers[0] if deadline and deadline.qualifiers else None
+        if deadline and requested_date and agreed_date and requested_date != agreed_date:
+            classification = Classification.NEEDS_CLARIFICATION
+            scheduling_flag = "deadline_conflict"
+            tags.append("scheduling_conflict")
+            rationale.append("The requested date conflicts with the agreed deadline; confirm the schedule.")
+            rules.append("deadline_conflict_precedes_scope_classification")
+        elif has_schedule and deadline and requested_date == agreed_date:
+            rationale.append("The requested launch date matches the agreed deadline.")
+
+    for item in parsed.items:
+        item_hits = [
+            hit
+            for hit in retrieved.hits
+            if (clause := _clause_for(hit.clause_id, agreement)) is not None
+            and (_concept_match(item, clause) or hit.relation == "context")
+        ]
+        if not item_hits and not item.ambiguity_tags:
+            classification = Classification.NEEDS_CLARIFICATION
+            if "no_matching_clause" not in tags:
+                tags.append("no_matching_clause")
+            rationale.append("No matching contractual evidence was found.")
+            rules.append("no_evidence_is_not_a_definitive_exclusion")
+            continue
+        if any(hit.clause_type is ClauseType.EXCLUSION for hit in item_hits):
+            generic_seo = "seo" in item.concepts and not _has_explicit_metadata(item)
+            if not generic_seo:
+                specific_include = any(
+                    hit.clause_type is ClauseType.DELIVERABLE and (
+                        "seo metadata" in hit.matched_concepts or _has_explicit_metadata(item)
+                    )
+                    for hit in item_hits
+                )
+                if not specific_include:
+                    classification = Classification.POTENTIALLY_OUT_OF_SCOPE
+                    if "excluded_work" not in tags and "logo" not in item.concepts:
+                        tags.append("excluded_work")
+                    rationale.append("The request matches work explicitly excluded by the agreement.")
+                    rules.append("explicit_exclusion_is_actionable_evidence")
+        if item.ambiguity_tags:
+            classification = Classification.NEEDS_CLARIFICATION
+            for tag in item.ambiguity_tags:
+                if tag not in tags:
+                    tags.append(tag)
+            rationale.append("Clarify the request's unresolved intent, quantity, or meaning.")
+            rules.append("ambiguity_requires_clarification")
+
+        if _is_page_item(item) and _explicit_page_request(item) and re.search(r"\b(add|create|build)\b", item.raw_text):
+            deliverable = _page_deliverable(agreement)
+            usage = _page_usage(agreement)
+            if usage is None:
+                classification = Classification.NEEDS_CLARIFICATION
+                if "current_usage_unknown" not in tags:
+                    tags.append("current_usage_unknown")
+                rationale.append("Current page usage is not recorded, so remaining capacity is unknown.")
+                rules.append("capacity_requires_current_usage")
+            elif deliverable and deliverable.quantity is not None and item.quantity is not None and usage + item.quantity > deliverable.quantity:
+                classification = Classification.POTENTIALLY_OUT_OF_SCOPE
+                rationale.append("The requested pages exceed the remaining included deliverable allowance.")
+                rules.append("deliverable_quantity_is_checked_against_current_usage")
+            elif item.quantity is None:
+                classification = Classification.NEEDS_CLARIFICATION
+            if "additional" in item.raw_text and (usage is None or deliverable is None):
+                classification = Classification.NEEDS_CLARIFICATION
+
+            if "additional" in item.raw_text or (
+                usage is not None
+                and deliverable is not None
+                and deliverable.quantity is not None
+                and item.quantity is not None
+                and usage + item.quantity > deliverable.quantity
+            ):
+                effort_exists = any(
+                    clause.subtype == "effort_assumption"
+                    and ("marketing page" in clause.source_text.lower() or "page" in clause.source_text.lower())
+                    for clause in agreement.clauses
+                )
+                rate_exists = any(
+                    clause.subtype == "hourly_rate" and clause.quantity is not None
+                    for clause in agreement.clauses
+                ) or agreement.pricing_rules.get("hourly_rate") is not None
+                if not effort_exists or not rate_exists:
+                    if "estimate_effort_assumption_missing" not in tags:
+                        tags.append("estimate_effort_assumption_missing")
+                    rationale.append("A complete estimate requires both an explicit effort assumption and an hourly rate.")
+
+        if "revision" in item.concepts:
+            limit = next((clause for clause in agreement.clauses if clause.subtype == "revision_round"), None)
+            requested_round = _round_number(item)
+            if limit and requested_round is not None and limit.quantity is not None and requested_round > limit.quantity:
+                classification = Classification.POTENTIALLY_OUT_OF_SCOPE
+                if "revision_allowance_exceeded" not in tags:
+                    tags.append("revision_allowance_exceeded")
+                rationale.append("The requested revision round exceeds the included allowance.")
+                rules.append("revision_round_allowance_is_inclusive")
+
+        if "logo" in item.concepts:
+            effort_exists = any(clause.subtype == "effort_assumption" and "logo" in clause.source_text.lower() for clause in agreement.clauses)
+            if not effort_exists:
+                tags.append("logo_effort_assumption_missing")
+                rationale.append("Logo work is excluded and has no explicit effort assumption for an estimate.")
+
+    if retrieved.conflict_clause_ids:
+        classification = Classification.NEEDS_CLARIFICATION
+        tags = [tag for tag in tags if tag != "excluded_work"]
+        rationale.append("Relevant agreement clauses contradict one another.")
+        rules.append("contradictory_evidence_requires_clarification")
+
+    # A schedule conflict always wins, including when another item is excluded.
+    if not parsed.items:
+        classification = Classification.NEEDS_CLARIFICATION
+        if "no_matching_clause" not in tags:
+            tags.append("no_matching_clause")
+        rationale.append("No actionable request item was provided.")
+        rules.append("empty_request_requires_clarification")
+
+    if scheduling_flag == "deadline_conflict":
+        classification = Classification.NEEDS_CLARIFICATION
+
+    return ClassifyOutput(
+        classification=classification,
+        rationale=rationale,
+        evidence_clause_ids=evidence_ids,
+        uncertainty_tags=list(dict.fromkeys(tags)),
+        conflicting_clause_ids=list(retrieved.conflict_clause_ids),
+        scheduling_flag=scheduling_flag,
+        decision_rules=list(dict.fromkeys(rules)),
+    )
+
+
+def _draft(parsed: ParseOutput, classified: ClassifyOutput, agreement: Agreement) -> DraftAction:
+    hours, cost, estimate_label = _estimate(parsed, agreement)
+    if classified.classification is Classification.IN_SCOPE:
+        kind, title = "response", "Confirm requested work"
+        body = "The request is supported by the cited agreement clauses and can proceed to human review."
+    elif classified.classification is Classification.POTENTIALLY_OUT_OF_SCOPE:
+        kind, title = "change_order", "Prepare a scope change review"
+        body = "The request may exceed the agreement or match excluded work; confirm a change order before proceeding."
+    else:
+        kind, title = "clarification", "Request clarification"
+        body = "Please clarify the highlighted request details before deciding scope."
+    return DraftAction(
+        kind=kind,
+        title=title,
+        body=body,
+        assumptions=list(classified.uncertainty_tags),
+        estimated_hours=hours,
+        estimated_cost=cost,
+        estimate_label=estimate_label,
+    )
+
+
+def analyze_request(request: Request | str, agreement: Agreement | Project, request_id: str = "request-1") -> AnalysisResult:
+    """Run parse, typed retrieval, classification, and draft stages."""
+
+    if isinstance(request, Project) and isinstance(agreement, Request):
+        return analyze_request(agreement, request.agreement, request_id=agreement.id)
+    if isinstance(agreement, Project):
+        project = agreement
+        agreement = project.agreement
+        if isinstance(request, str):
+            request = Request(id=request_id, project_id=project.id, text=request)
+    elif isinstance(request, str):
+        request = Request(id=request_id, project_id="project-1", text=request)
+    if not isinstance(request, Request):
+        raise TypeError("request must be a Request or string")
+    parsed = parse_request(request.text)
+    retrieved = retrieve_evidence(parsed, agreement)
+    classified = classify_request(parsed, retrieved, agreement)
+    draft = _draft(parsed, classified, agreement)
+    trace = PipelineTrace(parse=parsed, retrieve=retrieved, classify=classified, draft=draft)
+    return AnalysisResult(
+        request_id=request.id,
+        classification=classified.classification,
+        evidence_clause_ids=list(classified.evidence_clause_ids),
+        uncertainty_reasons=list(classified.uncertainty_tags),
+        conflicting_clause_ids=list(classified.conflicting_clause_ids),
+        scheduling_flag=classified.scheduling_flag,
+        trace=trace,
+        draft=draft,
+    )
+
+
+def analyze(project: Project, request: Request | str) -> AnalysisResult:
+    return analyze_request(request, project)

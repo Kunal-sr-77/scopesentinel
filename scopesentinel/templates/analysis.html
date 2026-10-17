@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% from "_macros.html" import classification_badge, classification_class, approval_badge, empty_state, tag_list, pipeline_output %}
+
+{% set page_title = 'Request review' %}
+{% set active_nav = 'dashboard' %}
+{% set breadcrumb = 'Request review' %}
+{% set project_name = analysis.project_name|default('Project workspace', true) if analysis is defined else 'Project workspace' %}
+
+{% block content %}
+  {% if analysis is defined and analysis %}
+    <section class="analysis-hero" aria-labelledby="analysis-title">
+      <div class="analysis-hero-copy">
+        <div class="hero-topline"><span class="request-id">{{ analysis.request_id }}</span>{{ approval_badge(analysis.approval_status) }}</div>
+        <h1 id="analysis-title">Request review</h1>
+        <p class="hero-project">{{ analysis.project_name|default('Project workspace', true) }}</p>
+      </div>
+      <div class="decision-card {{ classification_class(analysis.classification) }}">
+        <span class="overline">Scope assessment</span>
+        {{ classification_badge(analysis) }}
+        {% set classification = analysis.classification.value|default(analysis.classification, true) %}
+        {% if classification == 'IN_SCOPE' %}
+          <p>Supported by the agreement as written.</p>
+        {% elif classification == 'POTENTIALLY_OUT_OF_SCOPE' %}
+          <p>Review the supporting clause before committing to the request.</p>
+        {% elif classification == 'NEEDS_CLARIFICATION' %}
+          <p>There is not enough clear agreement evidence to decide yet.</p>
+        {% else %}
+          <p>Complete the analysis to see the scope assessment.</p>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="request-evidence-grid" aria-label="Request and supporting evidence">
+      <article class="request-card panel-card">
+        <div class="card-heading"><div><span class="eyebrow">Client words</span><h2>Incoming request</h2></div><span class="card-index">01</span></div>
+        {% if analysis.client_request %}
+          <blockquote class="request-quote">{{ analysis.client_request }}</blockquote>
+        {% else %}
+          {{ empty_state('Request text unavailable', 'The original client wording was not included in this view.') }}
+        {% endif %}
+      </article>
+
+      <article class="evidence-card panel-card">
+        <div class="card-heading"><div><span class="eyebrow">Agreement match</span><h2>Exact evidence</h2></div><span class="card-index">02</span></div>
+        {% if analysis.evidence %}
+          <div class="evidence-list">
+            {% for item in analysis.evidence %}
+              <article class="evidence-item">
+                <div class="evidence-item-head"><span class="clause-id">{{ item.clause_id }}</span><span class="clause-type">{{ item.clause_type }}</span></div>
+                <blockquote>{{ item.source_text }}</blockquote>
+                <p class="evidence-relation">{{ item.relation }}</p>
+                {{ tag_list(item.matched_concepts, 'blue') }}
+                {{ tag_list(item.matched_constraints, 'amber') }}
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          {{ empty_state('No evidence was returned', 'The analysis did not provide a source-preserving clause to review.') }}
+        {% endif %}
+      </article>
+    </section>
+
+    <section class="decision-grid" aria-label="Analysis explanation">
+      <article class="panel-card rationale-card">
+        <div class="card-heading"><div><span class="eyebrow">Decision notes</span><h2>Why this result?</h2></div><span class="card-index">03</span></div>
+        {% if analysis.rationale %}
+          <ul class="reason-list">{% for reason in analysis.rationale %}<li><span aria-hidden="true">↳</span>{{ reason }}</li>{% endfor %}</ul>
+        {% else %}<p class="muted-copy">No rationale was captured for this analysis.</p>{% endif %}
+        {% if analysis.uncertainty_tags %}
+          <div class="subsection-label">Uncertainty signals</div>{{ tag_list(analysis.uncertainty_tags, 'amber') }}
+        {% endif %}
+        {% if analysis.scheduling_flag %}
+          <div class="flag-callout"><span aria-hidden="true">!</span><div><strong>Scheduling flag</strong><p>{{ analysis.scheduling_flag }}</p></div></div>
+        {% endif %}
+      </article>
+
+      <article class="panel-card draft-card">
+        <div class="card-heading"><div><span class="eyebrow">Proposed next step</span><h2>Action &amp; estimate</h2></div><span class="card-index">04</span></div>
+        {% if analysis.draft %}
+          <span class="draft-kind">{{ analysis.draft.kind }}</span>
+          <h3>{{ analysis.draft.title }}</h3>
+          <p class="draft-body">{{ analysis.draft.body }}</p>
+          {% if analysis.draft.assumptions %}
+            <div class="subsection-label">Assumptions</div>
+            <ul class="assumption-list">{% for assumption in analysis.draft.assumptions %}<li>{{ assumption }}</li>{% endfor %}</ul>
+          {% endif %}
+          {% if analysis.draft.estimate_label or analysis.draft.estimated_hours is not none or analysis.draft.estimated_cost is not none %}
+            <div class="estimate-strip">
+              <span class="overline">Estimate</span>
+              {% if analysis.draft.estimate_label %}<strong>{{ analysis.draft.estimate_label }}</strong>{% endif %}
+              <div class="estimate-values">
+                {% if analysis.draft.estimated_hours is not none %}<span>{{ analysis.draft.estimated_hours }} hrs</span>{% endif %}
+                {% if analysis.draft.estimated_cost is not none %}<span>{{ analysis.draft.estimated_cost }}</span>{% endif %}
+              </div>
+            </div>
+          {% endif %}
+        {% else %}
+          {{ empty_state('No proposed action yet', 'A draft response or change order will appear here when the analysis provides one.') }}
+        {% endif %}
+      </article>
+    </section>
+
+    <section class="pipeline-section" aria-labelledby="pipeline-title">
+      <div class="section-heading"><div><span class="eyebrow">Transparent by design</span><h2 id="pipeline-title">Analysis pipeline</h2></div><span class="pipeline-caption">Four deterministic stages</span></div>
+      {% if analysis.pipeline %}
+        <ol class="pipeline-trace">
+          {% for stage in analysis.pipeline %}
+            <li class="trace-stage trace-{{ stage.status|default('pending', true) }}">
+              <div class="trace-stage-head"><span class="trace-stage-number">0{{ loop.index }}</span><span class="trace-stage-status">{{ stage.status|default('pending', true) }}</span></div>
+              <h3>{{ stage.label }}</h3>
+              <span class="trace-stage-key">{{ stage.key }}</span>
+              {{ pipeline_output(stage.output) }}
+            </li>
+          {% endfor %}
+        </ol>
+      {% else %}
+        <ol class="pipeline-trace pipeline-trace-empty">
+          {% for stage in [('parse', 'Parse'), ('retrieve', 'Retrieve'), ('classify', 'Classify'), ('draft', 'Draft')] %}
+            <li class="trace-stage trace-pending"><div class="trace-stage-head"><span class="trace-stage-number">0{{ loop.index }}</span><span class="trace-stage-status">awaiting data</span></div><h3>{{ stage[1] }}</h3><span class="trace-stage-key">{{ stage[0] }}</span><p class="trace-empty">No stage output captured.</p></li>
+          {% endfor %}
+        </ol>
+      {% endif %}
+    </section>
+
+    <section class="approval-panel" aria-labelledby="approval-title">
+      <div class="approval-panel-copy"><span class="eyebrow">Human checkpoint</span><h2 id="approval-title">Review before anything leaves this workspace.</h2><p>Approval acknowledges that you reviewed the evidence and proposed action. It is a local record only — it never sends a message, approves a charge, or modifies a contract.</p></div>
+      <div class="approval-panel-action">
+        {{ approval_badge(analysis.approval_status) }}
+        {% set approval = analysis.approval_status.value|default(analysis.approval_status, true) %}
+        {% if approval == 'approved' %}
+          <p class="approval-confirmation"><span aria-hidden="true">✓</span> This review has been acknowledged locally.</p>
+        {% elif analysis.can_approve %}
+          <form action="{{ approval_form_action|default('#', true) }}" method="post" data-approval-form>
+            <input type="hidden" name="request_id" value="{{ analysis.request_id }}">
+            <label class="acknowledgment"><input type="checkbox" name="review_acknowledged" required data-approval-ack><span>I reviewed the request, evidence, and proposed action.</span></label>
+            <button class="button button-primary button-full" type="submit" data-approval-submit disabled>Acknowledge review <span aria-hidden="true">→</span></button>
+          </form>
+        {% else %}
+          <p class="muted-copy">This analysis is not available for approval yet.</p>
+        {% endif %}
+      </div>
+    </section>
+  {% else %}
+    <section class="standalone-empty">{{ empty_state('Analysis unavailable', 'Choose a request from the dashboard to inspect its evidence and proposed action.', 'Back to overview', dashboard_url|default('#', true)) }}</section>
+  {% endif %}
+{% endblock %}

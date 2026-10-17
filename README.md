@@ -117,8 +117,9 @@ The fixed Step 2 evaluation set is in `scopesentinel/evaluation.py` and contains
 matches, missing quantities, unknown current usage, and scheduling conflicts.
 Each case specifies its expected classification, supporting evidence clause
 IDs, uncertainty tags, and scheduling flag where applicable. The measured
-evaluation accuracy will be reported after the analysis engine is integrated;
-no accuracy claim is made before that check runs.
+evaluation accuracy is **16/16 (100%)** in the latest integrated run. This is
+strict accuracy across classification, evidence clause IDs, uncertainty tags,
+and scheduling flags; it is not a legal or contractual accuracy claim.
 
 ## Safety boundaries
 

@@ -1,0 +1,70 @@
+{# Presentation helpers only. Values are read from the frozen view models. #}
+{% macro classification_value(classification) -%}
+  {{ classification.value|default(classification, true) }}
+{%- endmacro %}
+
+{% macro classification_class(classification) -%}
+  {% set value = classification.value|default(classification, true) %}
+  {% if value == 'IN_SCOPE' %}classification-in-scope
+  {% elif value == 'POTENTIALLY_OUT_OF_SCOPE' %}classification-out-of-scope
+  {% elif value == 'NEEDS_CLARIFICATION' %}classification-needs-clarification
+  {% else %}classification-pending
+  {% endif %}
+{%- endmacro %}
+
+{% macro classification_badge(analysis, compact=false) -%}
+  {% set value = analysis.classification.value|default(analysis.classification, true) %}
+  <span class="classification-badge {{ classification_class(analysis.classification) }}{% if compact %} classification-badge-compact{% endif %}" title="{{ value|default('Classification pending', true) }}">
+    <span class="status-dot" aria-hidden="true"></span>
+    <span>{{ analysis.classification_label|default('Classification pending', true) }}</span>
+  </span>
+{%- endmacro %}
+
+{% macro approval_badge(status) -%}
+  {% set value = status.value|default(status, true) %}
+  {% if value == 'approved' %}
+    <span class="approval-badge approval-approved"><span aria-hidden="true">✓</span> Approved locally</span>
+  {% else %}
+    <span class="approval-badge approval-pending"><span aria-hidden="true">◷</span> Pending review</span>
+  {% endif %}
+{%- endmacro %}
+
+{% macro empty_state(title, message, action_label=None, action_href='#') -%}
+  <div class="empty-state">
+    <div class="empty-state-mark" aria-hidden="true">—</div>
+    <h3>{{ title }}</h3>
+    <p>{{ message }}</p>
+    {% if action_label %}<a class="button button-secondary" href="{{ action_href }}">{{ action_label }}</a>{% endif %}
+  </div>
+{%- endmacro %}
+
+{% macro tag_list(values, tone='neutral') -%}
+  {% if values %}
+    <div class="tag-list">
+      {% for value in values %}<span class="tag tag-{{ tone }}">{{ value }}</span>{% endfor %}
+    </div>
+  {% endif %}
+{%- endmacro %}
+
+{% macro pipeline_output(output) -%}
+  {% if output %}
+    <dl class="trace-output">
+      {% for key, value in output.items() %}
+        <div>
+          <dt>{{ key|replace('_', ' ')|title }}</dt>
+          <dd>
+            {% if value is iterable and value is not string and value is not mapping %}
+              {{ value|join(', ') }}
+            {% elif value is mapping %}
+              {{ value|tojson }}
+            {% else %}
+              {{ value }}
+            {% endif %}
+          </dd>
+        </div>
+      {% endfor %}
+    </dl>
+  {% else %}
+    <p class="trace-empty">No stage output captured.</p>
+  {% endif %}
+{%- endmacro %}

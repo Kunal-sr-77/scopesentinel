@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "_macros.html" import classification_badge, approval_badge, empty_state %}
+
+{% set page_title = 'Request history' %}
+{% set active_nav = 'history' %}
+{% set breadcrumb = 'History' %}
+{% set project_name = dashboard.project_name|default(project_name|default('Project workspace', true), true) if dashboard is defined else project_name|default('Project workspace', true) %}
+{% set client_name = dashboard.client_name|default(client_name|default('Client account', true), true) if dashboard is defined else client_name|default('Client account', true) %}
+
+{% block content %}
+  <section class="page-intro" aria-labelledby="history-title">
+    <div><span class="eyebrow">Record</span><h1 id="history-title">Request history</h1><p class="lede">A simple record of analyses, decisions, and local review acknowledgements.</p></div>
+    <a class="button button-primary" href="{{ new_request_url|default('#', true) }}"><span aria-hidden="true">＋</span> New request</a>
+  </section>
+
+  <section class="history-panel history-panel-full" aria-label="All request history">
+    {% if dashboard is defined and dashboard.history %}
+      <div class="history-table-head" aria-hidden="true"><span>Request</span><span>Classification</span><span>Review state</span><span></span></div>
+      <div class="history-list">
+        {% for item in dashboard.history %}
+          <a class="history-row history-row-detailed" href="{{ analysis_url|default('#', true) }}{{ item.request_id }}">
+            <span class="history-row-main"><strong>{{ item.request_id }}</strong><span>{{ item.client_request|default('No request text available.', true) }}</span></span>
+            <span>{{ classification_badge(item, true) }}</span>
+            <span>{{ approval_badge(item.approval_status) }}</span>
+            <span class="history-row-arrow" aria-hidden="true">→</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      {{ empty_state('Your history is empty', 'Completed analyses will be kept here for quick reference.', 'Analyze a request', new_request_url|default('#', true)) }}
+    {% endif %}
+  </section>
+{% endblock %}

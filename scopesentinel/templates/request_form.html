@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% set page_title = 'New request' %}
+{% set active_nav = 'new-request' %}
+{% set breadcrumb = 'New request' %}
+{% set project_name = dashboard.project_name|default(project_name|default('Project workspace', true), true) if dashboard is defined else project_name|default('Project workspace', true) %}
+{% set client_name = dashboard.client_name|default(client_name|default('Client account', true), true) if dashboard is defined else client_name|default('Client account', true) %}
+
+{% block content %}
+  <section class="page-intro" aria-labelledby="new-request-title">
+    <div>
+      <span class="eyebrow">Request intake</span>
+      <h1 id="new-request-title">Bring a request into focus.</h1>
+      <p class="lede">Paste the client’s words exactly as they arrived. ScopeSentinel will compare them with the active agreement.</p>
+    </div>
+  </section>
+
+  <div class="form-layout">
+    <section class="form-card" aria-labelledby="request-form-heading">
+      <div class="card-heading">
+        <div><span class="eyebrow">Step 01</span><h2 id="request-form-heading">Client request</h2></div>
+        <span class="required-note">Required</span>
+      </div>
+      <form action="{{ request_form_action|default('#', true) }}" method="post" data-request-form>
+        {% if project_id is defined %}<input type="hidden" name="project_id" value="{{ project_id }}">{% endif %}
+        <div class="field-group">
+          <label for="request-text">What did the client ask for?</label>
+          <p class="field-help" id="request-text-help">Include quantities, timing, and qualifiers when they were part of the original request.</p>
+          <textarea id="request-text" name="request_text" rows="11" required aria-describedby="request-text-help request-text-count" placeholder="Paste the request exactly as received…">{{ request_text|default('', true) }}</textarea>
+          <div class="field-footer"><span>Exact wording is preserved for review.</span><span id="request-text-count">0 characters</span></div>
+        </div>
+        <div class="form-actions">
+          <a class="button button-quiet" href="{{ dashboard_url|default('#', true) }}">Cancel</a>
+          <button class="button button-primary" type="submit">Analyze request <span aria-hidden="true">→</span></button>
+        </div>
+      </form>
+    </section>
+
+    <aside class="process-card" aria-labelledby="process-heading">
+      <span class="eyebrow">What happens next</span>
+      <h2 id="process-heading">A traceable review, not a black box.</h2>
+      <ol class="mini-pipeline">
+        <li><span class="stage-number">01</span><span><strong>Parse</strong><small>Normalize the requested action</small></span></li>
+        <li><span class="stage-number">02</span><span><strong>Retrieve</strong><small>Find relevant agreement clauses</small></span></li>
+        <li><span class="stage-number">03</span><span><strong>Classify</strong><small>Show scope and uncertainty</small></span></li>
+        <li><span class="stage-number">04</span><span><strong>Draft</strong><small>Prepare a proposed next action</small></span></li>
+      </ol>
+      <div class="process-note"><span aria-hidden="true">i</span><p>Analysis is local. No client message is sent and no contract is changed.</p></div>
+    </aside>
+  </div>
+{% endblock %}

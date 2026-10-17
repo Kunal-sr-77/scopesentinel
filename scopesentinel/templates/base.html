@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f7f8fb">
+    <title>{{ page_title|default('ScopeSentinel', true) }} · ScopeSentinel</title>
+    <link rel="stylesheet" href="{{ static_url|default('/static/app.css', true) }}">
+    <script src="{{ script_url|default('/static/app.js', true) }}" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <div class="app-shell">
+      <aside class="sidebar" id="primary-navigation" aria-label="Primary navigation">
+        <div class="brand-lockup">
+          <a class="brand" href="{{ dashboard_url|default('#', true) }}" aria-label="ScopeSentinel home">
+            <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+            <span>ScopeSentinel</span>
+          </a>
+          <span class="brand-caption">Evidence-backed scope review</span>
+        </div>
+
+        <div class="workspace-switcher">
+          <span class="overline">Active workspace</span>
+          <strong>{{ project_name|default('Project workspace', true) }}</strong>
+          <span>{{ client_name|default('Client account', true) }}</span>
+        </div>
+
+        <nav class="main-nav" aria-label="Workspace">
+          <span class="nav-section-label">Workspace</span>
+          <a class="nav-link{% if active_nav|default('') == 'dashboard' %} is-active{% endif %}" href="{{ dashboard_url|default('#', true) }}"{% if active_nav|default('') == 'dashboard' %} aria-current="page"{% endif %}>
+            <span class="nav-icon" aria-hidden="true">⌂</span><span>Overview</span>
+          </a>
+          <a class="nav-link{% if active_nav|default('') == 'new-request' %} is-active{% endif %}" href="{{ new_request_url|default('#', true) }}"{% if active_nav|default('') == 'new-request' %} aria-current="page"{% endif %}>
+            <span class="nav-icon" aria-hidden="true">＋</span><span>New request</span>
+          </a>
+          <a class="nav-link{% if active_nav|default('') == 'history' %} is-active{% endif %}" href="{{ history_url|default('#', true) }}"{% if active_nav|default('') == 'history' %} aria-current="page"{% endif %}>
+            <span class="nav-icon" aria-hidden="true">◷</span><span>History</span>
+          </a>
+          <a class="nav-link{% if active_nav|default('') == 'setup' %} is-active{% endif %}" href="{{ setup_url|default('#', true) }}"{% if active_nav|default('') == 'setup' %} aria-current="page"{% endif %}>
+            <span class="nav-icon" aria-hidden="true">⚙</span><span>Project setup</span>
+          </a>
+        </nav>
+
+        <div class="sidebar-note">
+          <span class="note-icon" aria-hidden="true">●</span>
+          <div><strong>Local review mode</strong><p>Nothing is sent automatically.</p></div>
+        </div>
+      </aside>
+
+      <div class="page-frame">
+        <header class="topbar">
+          <button class="menu-toggle" type="button" aria-controls="primary-navigation" aria-expanded="false" data-menu-toggle>
+            <span class="sr-only">Toggle navigation</span><span aria-hidden="true">☰</span>
+          </button>
+          <div class="breadcrumbs" aria-label="Breadcrumb">
+            <span>Workspace</span><span aria-hidden="true">/</span><strong>{{ breadcrumb|default('Overview', true) }}</strong>
+          </div>
+          <div class="topbar-meta"><span class="secure-indicator"><span aria-hidden="true">●</span> Private workspace</span></div>
+        </header>
+
+        <main class="main-content" id="main-content">
+          {% block content %}{% endblock %}
+        </main>
+
+        <footer class="site-footer">
+          <span>ScopeSentinel</span><span>•</span><span>Review evidence before you respond.</span>
+        </footer>
+      </div>
+    </div>
+  </body>
+</html>
