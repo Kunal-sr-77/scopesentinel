@@ -84,13 +84,24 @@ docker run --rm -p 8000:8000 scopesentinel:step1
 
 ## Test
 
-The canonical local test command is:
+After activating the project-local virtual environment and installing the
+locked dependencies, run the canonical local test command:
 
 ```bash
+. .venv/bin/activate
+python -m pip install --requirement requirements.lock
 make test
 ```
 
 Tests use temporary JSON files. They never write to `data/history.json`.
+
+For a clean container verification, build the image first and then run the
+same test target with networking disabled:
+
+```bash
+docker build -t scopesentinel:step1 .
+docker run --rm --network none scopesentinel:step1 make test
+```
 
 ## Evaluation set
 
