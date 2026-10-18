@@ -25,9 +25,9 @@ charge approval, or contract modification.
 
 ## Current status
 
-Steps 1–4 are implemented and the original evaluation plus first independent
-holdout set are passing. The separate `make eval` command reports holdout
-accuracy without affecting the build gate.
+The MVP is implemented. `make test` runs the regression and application suite;
+`make eval` reports the fixed evaluation and independent holdout suites without
+affecting the build gate.
 
 ## Architecture
 
@@ -79,23 +79,34 @@ python app.py
 
 Open <http://localhost:8000>.
 
-## Exact Docker verification commands
+## Docker
 
-These are the two canonical commands for the buildathon:
-
-```bash
-docker build -t scopesentinel:step1 .
-docker run --rm --network none scopesentinel:step1 make test
-```
-
-The second command runs the exact `make test` target with networking disabled.
-The application itself can be started with:
+Build the image:
 
 ```bash
-docker run --rm -p 8000:8000 scopesentinel:step1
+docker build -t scopesentinel .
 ```
 
-## Test
+Run the tests without network access:
+
+```bash
+docker run --rm --network none scopesentinel make test
+```
+
+Run the application with persistent history:
+
+```bash
+docker run --rm -p 8000:8000 -v scopesentinel-data:/app/data scopesentinel
+```
+
+Without `-v`, history is lost when the container stops. Reset the persistent
+history volume with:
+
+```bash
+docker volume rm scopesentinel-data
+```
+
+## Test and evaluation
 
 After activating the project-local virtual environment and installing the
 locked dependencies, run the canonical local test command:
@@ -108,8 +119,9 @@ make test
 
 Tests use temporary JSON files. They never write to `data/history.json`.
 
-`make test` runs regression, boundary, and application tests but excludes the
-strict holdout assertion. Run the independent report separately:
+`make test` currently runs **44 tests**: regression, boundary, setup-path, and
+application tests. It excludes strict holdout assertions. Run the separate
+evaluation report with:
 
 ```bash
 make eval
@@ -117,25 +129,26 @@ make eval
 
 `make eval` always prints accuracy and every failure without failing the build.
 
-## Evaluation set
+## Evaluation results
 
 The fixed Step 2 evaluation set is in `scopesentinel/evaluation.py` and contains
 16 labelled scenarios, including worked examples A-E, false-positive keyword
 matches, missing quantities, unknown current usage, and scheduling conflicts.
 Each case specifies its expected classification, supporting evidence clause
-IDs, uncertainty tags, and scheduling flag where applicable. The measured
-evaluation accuracy is **16/16 (100%)** in the latest integrated run. This is
-strict accuracy across classification, evidence clause IDs, uncertainty tags,
-and scheduling flags; it is not a legal or contractual accuracy claim.
+IDs, uncertainty tags, and scheduling flag where applicable. The fixed set
+reports **16/16**.
 
-### Independent Step 4 holdout
+These sets were used while tuning the rules, so these scores are not evidence
+of accuracy on unseen requests. Accuracy on genuinely unseen requests has not
+been measured.
+
+### Independent holdout
 
 The independent QA set is in `tests/holdout_cases.py`. It contains **15 new
 natural-language scenarios**, including **4 false-positive traps**, and is
 evaluated separately from the original 16 cases. Strict accuracy across
 classification, evidence clause IDs, uncertainty tags, scheduling flags, and
-the requested estimate fields is currently **15/15 (100%)** after general
-rule-level fixes.
+the requested estimate fields is **15/15**.
 
 The original holdout findings led to general rules for:
 
@@ -152,21 +165,19 @@ The holdout report command is:
 make eval
 ```
 
-The strict report currently passes with no failures. The Step 4 boundary suite
-passes and covers direct approval
-bypass, empty input, malformed input, and corrupted history using temporary
-JSON files. Corrupted history is quarantined as
+The strict report currently passes with no failures. The boundary suite covers
+direct approval bypass, empty input, malformed input, and corrupted history
+using temporary JSON files. Corrupted history is quarantined as
 `history.corrupt-<timestamp>.json`, the store starts empty, and the dashboard
 shows a visible recovery notice.
 
-### Fresh post-fix holdout
+### Fresh holdout
 
 The QA agent added a separate set of exactly **10 fresh scenarios**, H16–H25,
 in `tests/fresh_holdout_cases.py`, with **4 false-positive traps** and different
 client phrasing from the first holdout. Its strict accuracy is separately
-reported as **10/10 (100%)**, with no failures. `make eval` prints both the
-15-case original holdout result and this fresh 10-case result without failing
-the build.
+reported as **10/10**, with no failures. `make eval` prints both holdout
+results without failing the build.
 
 ## Demo walkthrough
 
@@ -206,24 +217,40 @@ the build.
    Approval only records a local review; it never sends a message, approves a
    charge, or modifies a contract. Visit **History** to see the saved record.
 
+## Built with OmniRush
+
+The project was built with OmniRush using a deterministic core plus parallel
+contract-analysis, frontend, and QA sub-agents. Each request exposes four
+pipeline stages: **parse**, **retrieve**, **classify**, and **draft**.
+
+## Known issue fixed
+
+Manual testing found that projects saved through the setup form could produce
+different clause metadata from the built-in sample, which skipped the
+revision-limit check. This was fixed in commit `ba7287c`; regression tests now
+compare the setup-form and sample paths, including the fixed evaluation and
+both holdout suites.
+
 ## Limitations
 
-- The classifier is deterministic and transparent, not a general semantic or
-  legal reasoning system. It uses a curated synonym vocabulary and typed
-  agreement fields.
-- Vague quantities, copied-content intent, and compound requests can still
-  require clarification; the independent evaluation commands are the source
-  of truth for current behavior.
-- Agreement setup is line-oriented. Complex nested conditions, precedence
-  language, and amendments are not modeled in this MVP.
+- The engine uses a curated synonym map rather than general semantic
+  understanding.
+- Reliable quantity and limit checks require explicit units and quantities;
+  vague or unsupported quantities fall toward clarification.
+- The parser is English-only.
+- The setup editor supports a single sample-project agreement format with
+  line-oriented clauses, not complex nested conditions or amendments.
+- ScopeSentinel makes no legal determination.
+- Estimates are produced only from configured effort assumptions and rates.
+- Revision rounds are read from the request text only; the app does not track
+  revision rounds already used per page.
+- The rule-based engine can miss phrasings it has not seen. When it cannot
+  resolve a request safely, it fails toward `NEEDS_CLARIFICATION`.
 - JSON history is local and intentionally small. Corrupted JSON is quarantined
   and replaced with empty history, but there is no multi-user locking layer.
-- Estimates are not legal, financial, or contractual commitments. They appear
-  only when explicit effort and rate assumptions support them, and all actions
-  require human review.
-- The current buildathon environment has not verified a clean Docker build in
-  this sandbox when base-image layer extraction rejects `lchown`; the exact
-  Docker commands remain documented for a Docker-capable Linux host.
+
+**Future work:** use a hybrid design where an LLM extracts structured fields
+and deterministic rules make the final scope call.
 
 ## Safety boundaries
 
