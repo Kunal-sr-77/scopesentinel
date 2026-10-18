@@ -225,6 +225,21 @@ class EvidenceAndEstimateTests(unittest.TestCase):
             [("d-marketing-pages", "supports"), ("x-logo-design", "context")],
         )
 
+    def test_preservation_context_cannot_support_an_unrelated_footer_item(self) -> None:
+        text = "Please keep the logo as is and update the footer."
+        result = analyze_request(text, evaluation_agreement())
+
+        self.assertEqual(result.classification, Classification.NEEDS_CLARIFICATION)
+        self.assertIn("no_matching_clause", result.trace.classify.uncertainty_tags)
+        self.assertEqual(result.evidence_clause_ids, [])
+        self.assertEqual(
+            [(hit.clause_id, hit.relation) for hit in result.trace.retrieve.hits],
+            [("x-logo-design", "context")],
+        )
+        questions = " ".join(result.draft.clarification_questions).lower()
+        self.assertIn("does not match any listed deliverable or exclusion", questions)
+        self.assertIn("confirm whether it is new work", questions)
+
     def test_implied_page_quantity_drives_remaining_capacity_and_estimate(self) -> None:
         text = "Please add a testimonials page."
         remaining = analyze_request(text, evaluation_agreement("four_pages_used"))

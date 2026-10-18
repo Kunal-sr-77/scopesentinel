@@ -206,13 +206,13 @@ def _ambiguity_tags(text: str, concepts: tuple[str, ...], quantity: float | None
 def _split_request(text: str) -> list[str]:
     # Split only where the next fragment starts a new action. This keeps
     # "SEO title and meta description" as one requested item.
-    pattern = r"(?:,\s*|\s+)and\s+(?=(?:add|design|build|create|write|revise|make|improve|have|confirm|launch)\b)"
+    pattern = r"(?:,\s*|\s+)and\s+(?=(?:add|design|build|create|write|revise|make|improve|update|have|confirm|launch)\b)"
     parts = [part.strip(" ,") for part in re.split(pattern, text, flags=re.IGNORECASE)]
     return [part for part in parts if part]
 
 
 def _intent(text: str) -> str | None:
-    if re.search(r"\b(revise|revision|edit|change|tweak)\b", text) or re.search(
+    if re.search(r"\b(revise|revision|edit|change|tweak|update)\b", text) or re.search(
         r"\b(?:\d+(?:st|nd|rd|th)|one|two|three|four|five)\s+round\s+of\s+(?:changes|edits|tweaks)\b",
         text,
     ):
@@ -821,6 +821,15 @@ def classify_request(parsed: ParseOutput, retrieved: RetrieveOutput, agreement: 
         rationale = [
             f"Scope evidence clauses {', '.join(scope_evidence_ids) or 'none'} were retrieved, but clarification is required because {reason}.",
         ]
+        preserved_context_ids = [
+            hit.clause_id
+            for hit in retrieved.hits
+            if "preservation" in hit.matched_constraints
+        ]
+        if preserved_context_ids:
+            rationale.append(
+                f"Preservation context {', '.join(preserved_context_ids)} does not trigger the exclusion."
+            )
         rules.append("uncertainty_or_conflict_requires_human_clarification")
 
     return ClassifyOutput(
