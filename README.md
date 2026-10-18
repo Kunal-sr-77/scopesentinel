@@ -7,10 +7,7 @@ prepares a human-reviewable next action.
 
 ## MVP cut line
 
-The submission target is the evening of **19 October 2026**, ahead of the
-buildathon deadline of **20 October 2026 at 11:59 PM IST**.
-
-The committed MVP will include:
+The implemented MVP includes:
 
 - project setup and sample project loading,
 - request intake,
@@ -25,9 +22,12 @@ charge approval, or contract modification.
 
 ## Current status
 
-The MVP is implemented. `make test` runs the regression and application suite;
-`make eval` reports the fixed evaluation and independent holdout suites without
-affecting the build gate.
+The MVP is implemented and includes project setup and sample loading, request
+intake, deterministic local clause retrieval and classification, exact source
+evidence, a serializable `PipelineTrace`, draft response or change order,
+explicit human approval, and JSON-backed request history. `make test` runs the
+regression and application suite; `make eval` reports the fixed evaluation and
+independent holdout suites without affecting the build gate.
 
 ## Architecture
 
@@ -38,10 +38,10 @@ affecting the build gate.
 - Python `unittest` with no network access or external API
 - No database and no native dependencies
 
-The shared interfaces are in `scopesentinel/domain.py`. The main pipeline will
-return a serializable `PipelineTrace` with `parse`, `retrieve`, `classify`, and
-`draft` outputs. Agreement clauses preserve their original `source_text` and
-are typed as deliverables, exclusions, limits, rates, or deadlines.
+The shared interfaces are in `scopesentinel/domain.py`. The main pipeline
+returns a serializable `PipelineTrace` with `parse`, `retrieve`, `classify`,
+and `draft` outputs. Agreement clauses preserve their original `source_text`
+and are typed as deliverables, exclusions, limits, rates, or deadlines.
 
 ### Dependency pin audit
 
@@ -197,14 +197,6 @@ results without failing the build.
 4. Submit:
 
    ```text
-   Please improve SEO.
-   ```
-
-   The clarification draft asks whether the client means included metadata or
-   excluded strategy/keyword research.
-5. Submit:
-
-   ```text
    Please add two case-study pages and design a new logo.
    ```
 
@@ -213,7 +205,23 @@ results without failing the build.
    `2 pages × 4 hours/page = 8 estimated hours; 8 hours × $125/hour = $1,000`.
    The logo is explicitly excluded from that estimate because it has no effort
    assumption.
-6. Review the evidence and draft, check the acknowledgment box, and approve.
+5. Submit:
+
+   ```text
+   Can you make the site feel more premium and improve SEO?
+   ```
+
+   The clarification draft asks which pages and changes the client wants, and
+   whether SEO means included metadata or excluded strategy/keyword research.
+6. Submit:
+
+   ```text
+   Can you do a 3rd round of changes on the pricing page.
+   ```
+
+   The page shows `POTENTIALLY_OUT_OF_SCOPE` because the sample agreement
+   allows two revision rounds.
+7. Review the evidence and draft, check the acknowledgment box, and approve.
    Approval only records a local review; it never sends a message, approves a
    charge, or modifies a contract. Visit **History** to see the saved record.
 
