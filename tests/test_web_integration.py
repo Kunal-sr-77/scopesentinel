@@ -4,8 +4,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from scopesentinel.analysis import analyze_request
+from scopesentinel.domain import ClauseType, Request
+from scopesentinel.evaluation import EVALUATION_CASES, evaluation_agreement
 from scopesentinel.store import JsonHistoryStore
 from scopesentinel.web import create_app
+from tests.fresh_holdout_cases import FRESH_HOLDOUT_CASES
+from tests.holdout_cases import HOLDOUT_CASES
 
 
 class WebWorkflowTests(unittest.TestCase):
@@ -18,6 +23,48 @@ class WebWorkflowTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
+
+    def _setup_form_project(self, variant: str = "standard"):
+        agreement = evaluation_agreement(variant)
+        values = {
+            "project_name": "Northstar Marketing Site",
+            "client_name": "Northstar Studio",
+            "deliverables": "\n".join(
+                clause.source_text
+                for clause in agreement.clauses
+                if clause.type is ClauseType.DELIVERABLE
+            ),
+            "exclusions": "\n".join(
+                clause.source_text
+                for clause in agreement.clauses
+                if clause.type is ClauseType.EXCLUSION
+            ),
+            "limits": "\n".join(
+                clause.source_text
+                for clause in agreement.clauses
+                if clause.type is ClauseType.LIMIT
+            ),
+            "deadlines": "\n".join(
+                clause.source_text
+                for clause in agreement.clauses
+                if clause.type is ClauseType.DEADLINE
+            ),
+            "pricing": "\n".join(
+                clause.source_text
+                for clause in agreement.clauses
+                if clause.type is ClauseType.RATE
+            ),
+            "pages_delivered": str(agreement.current_usage.get("marketing_page", "")),
+            "hourly_rate": str(agreement.pricing_rules.get("hourly_rate", "")),
+            "page_effort": str(
+                agreement.pricing_rules.get("effort_hours", {}).get(
+                    "additional_marketing_page", ""
+                )
+            ),
+        }
+        response = self.client.post("/setup", data=values)
+        self.assertEqual(response.status_code, 302)
+        return agreement, self.app.config["PROJECT"].agreement
 
     def test_setup_request_analysis_evidence_trace_and_approval_flow(self) -> None:
         setup = self.client.get("/setup")
@@ -68,6 +115,49 @@ class WebWorkflowTests(unittest.TestCase):
         self.assertEqual(approved.status_code, 200)
         self.assertIn(b"Approved locally", approved.data)
         self.assertEqual(self.store.list_records()[0].approval_status.value, "approved")
+
+    def test_setup_form_clause_fields_match_the_sample_clause_fields(self) -> None:
+        sample = evaluation_agreement()
+        _, form = self._setup_form_project()
+        sample_fields = sorted(
+            (c.type.value, c.subtype, c.quantity, c.unit, c.concepts, c.qualifiers)
+            for c in sample.clauses
+        )
+        form_fields = sorted(
+            (c.type.value, c.subtype, c.quantity, c.unit, c.concepts, c.qualifiers)
+            for c in form.clauses
+        )
+        self.assertEqual(form_fields, sample_fields)
+
+    def test_setup_form_path_matches_sample_classifications_for_all_fixed_sets(self) -> None:
+        cases = list(EVALUATION_CASES) + list(HOLDOUT_CASES) + list(FRESH_HOLDOUT_CASES)
+        for case in cases:
+            with self.subTest(case=case.id):
+                sample_agreement = evaluation_agreement(case.agreement_variant)
+                _, form_agreement = self._setup_form_project(case.agreement_variant)
+                sample_result = analyze_request(
+                    Request(id=f"sample-{case.id}", project_id="project-1", text=case.request_text),
+                    sample_agreement,
+                )
+                form_result = analyze_request(
+                    Request(id=f"form-{case.id}", project_id="project-1", text=case.request_text),
+                    form_agreement,
+                )
+                self.assertEqual(form_result.classification, sample_result.classification)
+
+    def test_setup_form_retrieval_excludes_unrelated_seo_metadata(self) -> None:
+        _, form_agreement = self._setup_form_project()
+        revision = analyze_request(
+            "Can you do a 3rd round of changes on the pricing page.",
+            form_agreement,
+        )
+        testimonials = analyze_request("Please add a testimonials page.", form_agreement)
+
+        self.assertEqual(revision.classification.value, "POTENTIALLY_OUT_OF_SCOPE")
+        self.assertNotIn("deliverables-2", revision.evidence_clause_ids)
+        self.assertNotIn("deliverables-2", [hit.clause_id for hit in revision.trace.retrieve.hits])
+        self.assertNotIn("deliverables-2", testimonials.evidence_clause_ids)
+        self.assertNotIn("deliverables-2", [hit.clause_id for hit in testimonials.trace.retrieve.hits])
 
     def test_empty_request_is_rejected_before_persistence(self) -> None:
         response = self.client.post("/requests/new", data={"request_text": "   "})

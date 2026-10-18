@@ -57,6 +57,7 @@ def _normalized(value: str) -> str:
 
 
 def _number_in(text: str) -> float | None:
+    text = text.lower()
     match = re.search(r"(?<![\w$])\d+(?:\.\d+)?", text)
     if match:
         return float(match.group())
@@ -110,6 +111,8 @@ def _subtype(clause_type: ClauseType, concepts: tuple[str, ...], text: str) -> s
             return "hourly_rate"
     if clause_type is ClauseType.LIMIT and "revision" in concepts:
         return "revision_round"
+    if clause_type is ClauseType.EXCLUSION and "logo" in concepts:
+        return "logo_design"
     for candidate in (
         "seo metadata",
         "seo strategy",
@@ -164,20 +167,49 @@ def _qualifiers(text: str) -> tuple[str, ...]:
     return tuple(qualifiers)
 
 
-def parse_clause(source_text: str, clause_id: str | None = None) -> Clause:
+def parse_clause(
+    source_text: str,
+    clause_id: str | None = None,
+    clause_type: ClauseType | None = None,
+) -> Clause:
     """Parse one clause while retaining its exact source string."""
 
     if not isinstance(source_text, str) or not source_text.strip():
         raise ValueError("source_text must be a non-empty string")
     source = source_text
-    clause_type = _clause_type(source)
+    clause_type = clause_type or _clause_type(source)
     concepts = _concepts(source)
+    if "seo metadata" in concepts or "seo strategy" in concepts:
+        concepts = tuple(
+            concept
+            for concept in concepts
+            if concept not in {"marketing page", "landing page", "case-study page"}
+        )
     subtype = _subtype(clause_type, concepts, source)
     quantity = _display_number(_number_in(source))
     if clause_type is ClauseType.RATE and subtype == "hourly_rate":
         dollar = re.search(r"\$\s*(\d+(?:\.\d+)?)", source)
         quantity = float(dollar.group(1)) if dollar else quantity
         quantity = _display_number(quantity)
+    if subtype == "marketing_page":
+        concepts = ("marketing page", "landing page", "case-study page", "page")
+    elif subtype == "revision_round":
+        concepts = ("revision", "change", "edit")
+    elif subtype == "seo_metadata":
+        concepts = ("seo", "metadata", "meta title", "meta description")
+    elif subtype == "seo_strategy":
+        concepts = ("seo", "strategy", "keyword research", "ranking")
+    elif subtype == "logo_design":
+        concepts = ("logo", "brand identity", "identity")
+    elif subtype == "copywriting":
+        concepts = ("copywriting", "copy", "content writing", "write")
+    elif subtype == "hourly_rate":
+        concepts = ("additional work", "hourly", "rate")
+    elif subtype == "effort_assumption":
+        concepts = ("additional marketing page", "page", "effort")
+    if subtype == "launch_date":
+        quantity = None
+        concepts = ("launch", "deadline", "delivery date")
     generated_id = clause_id or f"{clause_type.value}-{len(source)}"
     return Clause(
         id=generated_id,

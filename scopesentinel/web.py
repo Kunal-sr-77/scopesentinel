@@ -170,8 +170,12 @@ def create_app(store: JsonHistoryStore | None = None) -> Flask:
             for index, line in enumerate((line.strip() for line in source.splitlines()), start=1):
                 if not line:
                     continue
-                parsed = parse_clause(line, clause_id=f"{field_name}-{index}")
-                clauses.append(replace(parsed, type=expected_type))
+                parsed = parse_clause(
+                    line,
+                    clause_id=f"{field_name}-{index}",
+                    clause_type=expected_type,
+                )
+                clauses.append(parsed)
         return clauses
 
     def optional_number(value: str) -> float | None:
@@ -190,7 +194,7 @@ def create_app(store: JsonHistoryStore | None = None) -> Flask:
         if request.method == "POST":
             form = request.form
             try:
-                pages_delivered = optional_number(form.get("pages_delivered", "0")) or 0
+                pages_delivered = optional_number(form.get("pages_delivered", ""))
                 hourly_rate = optional_number(form.get("hourly_rate", ""))
                 page_effort = optional_number(form.get("page_effort", ""))
             except ValueError:
@@ -206,7 +210,11 @@ def create_app(store: JsonHistoryStore | None = None) -> Flask:
                 client_name=form.get("client_name", "Client account").strip() or "Client account",
                 agreement=Agreement(
                     clauses=clauses_from_form(form),
-                    current_usage={"marketing_page": pages_delivered},
+                    current_usage=(
+                        {"marketing_page": pages_delivered}
+                        if pages_delivered is not None
+                        else {}
+                    ),
                     pricing_rules={
                         "hourly_rate": hourly_rate,
                         "effort_hours": {
